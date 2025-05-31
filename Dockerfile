@@ -6,7 +6,8 @@ RUN apk add --no-cache \
     musl-dev \
     pkgconfig \
     openssl-dev \
-    git
+    git \
+    file
 
 # Set working directory
 WORKDIR /app
@@ -23,7 +24,7 @@ RUN RUST_LOG=debug cargo build --release --example server --verbose
 
 # Verify the binary was built
 RUN ls -la target/release/examples/
-RUN file target/release/examples/server
+RUN ls -la target/release/examples/server && echo "Binary size: $(du -h target/release/examples/server)"
 
 # Runtime stage - minimal Alpine image
 FROM alpine:latest
@@ -40,8 +41,7 @@ RUN apk add --no-cache \
 COPY --from=builder /app/target/release/examples/server /usr/local/bin/fast-socks5-server
 
 # Verify copy worked
-RUN ls -la /usr/local/bin/fast-socks5-server
-RUN file /usr/local/bin/fast-socks5-server
+RUN ls -la /usr/local/bin/fast-socks5-server && echo "Copied binary size: $(du -h /usr/local/bin/fast-socks5-server)"
 
 # Make executable
 RUN chmod +x /usr/local/bin/fast-socks5-server
@@ -56,7 +56,7 @@ RUN echo '#!/bin/bash' > /usr/local/bin/entrypoint.sh && \
     echo '# Debug info' >> /usr/local/bin/entrypoint.sh && \
     echo 'echo "=== Debug Info ==="' >> /usr/local/bin/entrypoint.sh && \
     echo 'echo "Binary exists: $(ls -la /usr/local/bin/fast-socks5-server 2>/dev/null || echo '"'"'NOT FOUND'"'"')"' >> /usr/local/bin/entrypoint.sh && \
-    echo 'echo "Binary info: $(file /usr/local/bin/fast-socks5-server 2>/dev/null || echo '"'"'FILE FAILED'"'"')"' >> /usr/local/bin/entrypoint.sh && \
+    echo 'echo "Binary info: $(ls -la /usr/local/bin/fast-socks5-server 2>/dev/null || echo '"'"'FILE FAILED'"'"')"' >> /usr/local/bin/entrypoint.sh && \
     echo '' >> /usr/local/bin/entrypoint.sh && \
     echo '# Set default values' >> /usr/local/bin/entrypoint.sh && \
     echo 'PROXY_USER=${PROXY_USER:-admin}' >> /usr/local/bin/entrypoint.sh && \
