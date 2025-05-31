@@ -1,7 +1,12 @@
-#!/bin/bash
+#!/bin/sh
 
 # Redirect all output to /dev/null để tắt hoàn toàn logs
 exec > /dev/null 2>&1
+
+# Tắt Rust logging environment variables
+export RUST_LOG=off
+export RUST_BACKTRACE=0
+unset RUST_LOG_STYLE
 
 # Set default values
 PROXY_PORT=${PROXY_PORT:-2324}
