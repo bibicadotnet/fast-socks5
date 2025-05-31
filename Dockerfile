@@ -1,30 +1,27 @@
 # Multi-stage build để tối ưu kích thước image
 FROM rust:1.75-alpine AS builder
 
-# Install dependencies for building
-RUN apk add --no-cache \
+# Install dependencies for building (bỏ git vì đã có source)
+RUN apk add --no-cache --quiet \
     musl-dev \
     pkgconfig \
-    openssl-dev \
-    git \
-    file
+    openssl-dev
 
 # Set working directory
 WORKDIR /app
 
-# Clone fast-socks5 repository
-RUN git clone https://github.com/dizda/fast-socks5.git . 2>/dev/null
+# Copy source code (thay vì git clone)
+COPY . .
 
-# Build without any debug output
+# Build with release optimization
 RUN cargo build --release --example server --quiet 2>/dev/null
 
-# Runtime stage - minimal Alpine image
+# Runtime stage - Alpine minimal nhưng đầy đủ tính năng
 FROM alpine:latest
 
-# Install runtime dependencies without output
+# Install minimal runtime dependencies
 RUN apk add --no-cache --quiet \
     ca-certificates \
-    bash \
     && addgroup -g 1000 socks5 2>/dev/null \
     && adduser -D -s /bin/sh -u 1000 -G socks5 socks5 2>/dev/null
 
@@ -44,5 +41,5 @@ USER socks5
 # Expose port 2324
 EXPOSE 2324
 
-# Set entrypoint with complete log suppression
+# Set entrypoint
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
