@@ -14,8 +14,16 @@ WORKDIR /app
 # Clone fast-socks5 repository
 RUN git clone https://github.com/dizda/fast-socks5.git .
 
-# Build the server example with optimizations
-RUN cargo build --release --example server
+# Debug: Show what we have
+RUN ls -la examples/
+RUN cat examples/server.rs | head -20
+
+# Build with verbose output to see any errors
+RUN RUST_LOG=debug cargo build --release --example server --verbose
+
+# Verify the binary was built
+RUN ls -la target/release/examples/
+RUN file target/release/examples/server
 
 # Runtime stage - minimal Alpine image
 FROM alpine:latest
@@ -24,26 +32,50 @@ FROM alpine:latest
 RUN apk add --no-cache \
     ca-certificates \
     netcat-openbsd \
+    bash \
     && addgroup -g 1000 socks5 \
     && adduser -D -s /bin/sh -u 1000 -G socks5 socks5
 
-# Copy the compiled binary
+# Copy the binary and verify it exists
 COPY --from=builder /app/target/release/examples/server /usr/local/bin/fast-socks5-server
 
+# Verify copy worked
+RUN ls -la /usr/local/bin/fast-socks5-server
+RUN file /usr/local/bin/fast-socks5-server
+
+# Make executable
+RUN chmod +x /usr/local/bin/fast-socks5-server
+
+# Test the binary
+RUN /usr/local/bin/fast-socks5-server --help || echo "Binary exists but help failed"
+
 # Create entrypoint script
-RUN echo '#!/bin/sh' > /usr/local/bin/entrypoint.sh && \
-    echo '' >> /usr/local/bin/entrypoint.sh && \
-    echo '# Set default values if not provided' >> /usr/local/bin/entrypoint.sh && \
-    echo 'PROXY_USER=${PROXY_USER:-admin}' >> /usr/local/bin/entrypoint.sh && \
-    echo 'PROXY_PASSWORD=${PROXY_PASSWORD:-password}' >> /usr/local/bin/entrypoint.sh && \
-    echo 'PROXY_PORT=${PROXY_PORT:-1080}' >> /usr/local/bin/entrypoint.sh && \
-    echo '' >> /usr/local/bin/entrypoint.sh && \
-    echo '# Start the server with environment variables' >> /usr/local/bin/entrypoint.sh && \
-    echo 'exec /usr/local/bin/fast-socks5-server \' >> /usr/local/bin/entrypoint.sh && \
-    echo '    --listen-addr "0.0.0.0:${PROXY_PORT}" \' >> /usr/local/bin/entrypoint.sh && \
-    echo '    --username "${PROXY_USER}" \' >> /usr/local/bin/entrypoint.sh && \
-    echo '    --password "${PROXY_PASSWORD}" \' >> /usr/local/bin/entrypoint.sh && \
-    echo '    2>/dev/null' >> /usr/local/bin/entrypoint.sh
+RUN cat > /usr/local/bin/entrypoint.sh << 'EOF'
+#!/bin/bash
+set -e
+
+# Debug info
+echo "=== Debug Info ==="
+echo "Binary exists: $(ls -la /usr/local/bin/fast-socks5-server 2>/dev/null || echo 'NOT FOUND')"
+echo "Binary info: $(file /usr/local/bin/fast-socks5-server 2>/dev/null || echo 'FILE FAILED')"
+
+# Set default values
+PROXY_USER=${PROXY_USER:-admin}
+PROXY_PASSWORD=${PROXY_PASSWORD:-password}
+PROXY_PORT=${PROXY_PORT:-1080}
+
+echo "Starting SOCKS5 server on 0.0.0.0:${PROXY_PORT} with user: ${PROXY_USER}"
+
+# Try to get help first
+echo "Checking server help:"
+/usr/local/bin/fast-socks5-server --help || echo "Help command failed"
+
+# Start server
+exec /usr/local/bin/fast-socks5-server \
+    --listen-addr "0.0.0.0:${PROXY_PORT}" \
+    -u "${PROXY_USER}" \
+    -p "${PROXY_PASSWORD}"
+EOF
 
 # Make entrypoint executable
 RUN chmod +x /usr/local/bin/entrypoint.sh
@@ -51,12 +83,8 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 # Switch to non-root user
 USER socks5
 
-# Expose default port (will be overridden by PROXY_PORT)
+# Expose default port
 EXPOSE 1080
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD nc -z localhost $PROXY_PORT || exit 1
 
 # Set entrypoint
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
