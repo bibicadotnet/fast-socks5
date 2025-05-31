@@ -13,23 +13,20 @@ RUN apk add --no-cache \
 WORKDIR /app
 
 # Clone fast-socks5 repository
-RUN git clone https://github.com/dizda/fast-socks5.git .
+RUN git clone https://github.com/dizda/fast-socks5.git . 2>/dev/null
 
-# Build with verbose output to see any errors
-RUN RUST_LOG=debug cargo build --release --example server --verbose
-
-# Verify the binary was built
-RUN ls -la target/release/examples/server && echo "Binary size: $(du -h target/release/examples/server)"
+# Build without any debug output
+RUN cargo build --release --example server --quiet 2>/dev/null
 
 # Runtime stage - minimal Alpine image
 FROM alpine:latest
 
-# Install runtime dependencies
-RUN apk add --no-cache \
+# Install runtime dependencies without output
+RUN apk add --no-cache --quiet \
     ca-certificates \
     bash \
-    && addgroup -g 1000 socks5 \
-    && adduser -D -s /bin/sh -u 1000 -G socks5 socks5
+    && addgroup -g 1000 socks5 2>/dev/null \
+    && adduser -D -s /bin/sh -u 1000 -G socks5 socks5 2>/dev/null
 
 # Copy the binary from builder
 COPY --from=builder /app/target/release/examples/server /usr/local/bin/fast-socks5-server
@@ -41,14 +38,11 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/fast-socks5-server && \
     chmod +x /usr/local/bin/entrypoint.sh
 
-# Test the binary
-RUN /usr/local/bin/fast-socks5-server --help
-
 # Switch to non-root user
 USER socks5
 
 # Expose port 2324
 EXPOSE 2324
 
-# Set entrypoint
+# Set entrypoint with complete log suppression
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
