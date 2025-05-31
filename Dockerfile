@@ -50,32 +50,30 @@ RUN chmod +x /usr/local/bin/fast-socks5-server
 RUN /usr/local/bin/fast-socks5-server --help || echo "Binary exists but help failed"
 
 # Create entrypoint script
-RUN cat > /usr/local/bin/entrypoint.sh << 'EOF'
-#!/bin/bash
-set -e
-
-# Debug info
-echo "=== Debug Info ==="
-echo "Binary exists: $(ls -la /usr/local/bin/fast-socks5-server 2>/dev/null || echo 'NOT FOUND')"
-echo "Binary info: $(file /usr/local/bin/fast-socks5-server 2>/dev/null || echo 'FILE FAILED')"
-
-# Set default values
-PROXY_USER=${PROXY_USER:-admin}
-PROXY_PASSWORD=${PROXY_PASSWORD:-password}
-PROXY_PORT=${PROXY_PORT:-1080}
-
-echo "Starting SOCKS5 server on 0.0.0.0:${PROXY_PORT} with user: ${PROXY_USER}"
-
-# Try to get help first
-echo "Checking server help:"
-/usr/local/bin/fast-socks5-server --help || echo "Help command failed"
-
-# Start server
-exec /usr/local/bin/fast-socks5-server \
-    --listen-addr "0.0.0.0:${PROXY_PORT}" \
-    -u "${PROXY_USER}" \
-    -p "${PROXY_PASSWORD}"
-EOF
+RUN echo '#!/bin/bash' > /usr/local/bin/entrypoint.sh && \
+    echo 'set -e' >> /usr/local/bin/entrypoint.sh && \
+    echo '' >> /usr/local/bin/entrypoint.sh && \
+    echo '# Debug info' >> /usr/local/bin/entrypoint.sh && \
+    echo 'echo "=== Debug Info ==="' >> /usr/local/bin/entrypoint.sh && \
+    echo 'echo "Binary exists: $(ls -la /usr/local/bin/fast-socks5-server 2>/dev/null || echo '"'"'NOT FOUND'"'"')"' >> /usr/local/bin/entrypoint.sh && \
+    echo 'echo "Binary info: $(file /usr/local/bin/fast-socks5-server 2>/dev/null || echo '"'"'FILE FAILED'"'"')"' >> /usr/local/bin/entrypoint.sh && \
+    echo '' >> /usr/local/bin/entrypoint.sh && \
+    echo '# Set default values' >> /usr/local/bin/entrypoint.sh && \
+    echo 'PROXY_USER=${PROXY_USER:-admin}' >> /usr/local/bin/entrypoint.sh && \
+    echo 'PROXY_PASSWORD=${PROXY_PASSWORD:-password}' >> /usr/local/bin/entrypoint.sh && \
+    echo 'PROXY_PORT=${PROXY_PORT:-1080}' >> /usr/local/bin/entrypoint.sh && \
+    echo '' >> /usr/local/bin/entrypoint.sh && \
+    echo 'echo "Starting SOCKS5 server on 0.0.0.0:${PROXY_PORT} with user: ${PROXY_USER}"' >> /usr/local/bin/entrypoint.sh && \
+    echo '' >> /usr/local/bin/entrypoint.sh && \
+    echo '# Try to get help first' >> /usr/local/bin/entrypoint.sh && \
+    echo 'echo "Checking server help:"' >> /usr/local/bin/entrypoint.sh && \
+    echo '/usr/local/bin/fast-socks5-server --help || echo "Help command failed"' >> /usr/local/bin/entrypoint.sh && \
+    echo '' >> /usr/local/bin/entrypoint.sh && \
+    echo '# Start server' >> /usr/local/bin/entrypoint.sh && \
+    echo 'exec /usr/local/bin/fast-socks5-server \' >> /usr/local/bin/entrypoint.sh && \
+    echo '    --listen-addr "0.0.0.0:${PROXY_PORT}" \' >> /usr/local/bin/entrypoint.sh && \
+    echo '    -u "${PROXY_USER}" \' >> /usr/local/bin/entrypoint.sh && \
+    echo '    -p "${PROXY_PASSWORD}"' >> /usr/local/bin/entrypoint.sh
 
 # Make entrypoint executable
 RUN chmod +x /usr/local/bin/entrypoint.sh
