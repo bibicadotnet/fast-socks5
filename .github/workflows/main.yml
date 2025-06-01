@@ -35,7 +35,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           push: true
-          tags: bibica/test_xoa
+          tags: bibica/fast-socks5-server-silent
           platforms: linux/amd64,linux/arm64
 
       # Tạo commit rỗng (để tránh tình huống "there hasn't been activity in this repository for at least 60 days")
