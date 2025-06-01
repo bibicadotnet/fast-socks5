@@ -1,31 +1,30 @@
+# Highly optimized Dockerfile for fast-socks5 server
 FROM rust:1.75-alpine AS builder
 
-RUN apk add --no-cache --quiet \
-    musl-dev \
-    pkgconfig \
-    openssl-dev
+# Install minimal build dependencies
+RUN apk add --no-cache musl-dev pkgconfig openssl-dev
 
 WORKDIR /app
 
+# Copy all source code (including examples/docker_server.rs)
 COPY . .
 
-RUN cargo build --release --example server --quiet 2>/dev/null
+# Build with aggressive size optimizations
+ENV RUSTFLAGS="-C opt-level=z -C target-cpu=generic -C panic=abort -C codegen-units=1 -C lto=fat"
+RUN cargo build --release --example server --quiet && \
+    cargo build --release --example docker_server --quiet && \
+    strip target/release/examples/server && \
+    strip target/release/examples/docker_server
 
-FROM alpine:3.19.7
+# Use static distroless for smallest size
+FROM gcr.io/distroless/static-debian12
 
-# Install minimal runtime dependencies
-RUN apk add --no-cache --quiet \
-    ca-certificates \
-    && addgroup -g 1000 socks5 2>/dev/null \
-    && adduser -D -s /bin/sh -u 1000 -G socks5 socks5 2>/dev/null
+# Copy both binaries
+COPY --from=builder /app/target/release/examples/server /fast-socks5-server
+COPY --from=builder /app/target/release/examples/docker_server /docker-entrypoint
 
-COPY --from=builder /app/target/release/examples/server /usr/local/bin/fast-socks5-server
+# Use nonroot user from distroless
+USER nonroot:nonroot
 
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-
-RUN chmod +x /usr/local/bin/fast-socks5-server && \
-    chmod +x /usr/local/bin/entrypoint.sh
-
-USER socks5
-
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+# Use Rust entrypoint wrapper for env vars support
+ENTRYPOINT ["/docker-entrypoint"]
