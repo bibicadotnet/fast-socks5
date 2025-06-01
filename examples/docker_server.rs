@@ -1,4 +1,3 @@
-// examples/docker_server.rs
 use std::env;
 use std::process::Command;
 
@@ -25,12 +24,12 @@ fn main() {
     ];
 
     // Add UDP support if enabled
-    if allow_udp == "true" && !public_addr.is_empty() {
+    if allow_udp.to_lowercase() == "true" && !public_addr.is_empty() {
         args.extend_from_slice(&["--allow-udp".to_string(), "--public-addr".to_string(), public_addr]);
     }
 
     // Add skip-auth if enabled
-    if skip_auth == "true" {
+    if skip_auth.to_lowercase() == "true" {
         args.push("--skip-auth".to_string());
     }
 
