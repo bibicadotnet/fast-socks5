@@ -26,7 +26,7 @@ center_text() {
 
 echo ""
 printf "${GREEN}%s${NC}\n" "$(printf '%*s' "$WIDTH" '' | tr ' ' '#')"
-center_text "$(printf "${GREEN}Fast Socks5 Proxy Installer (Auto Mode)${NC}")"
+center_text "$(printf "${GREEN}🚀 Fast Socks5 Proxy Installer (Auto Mode) 🚀${NC}")"
 printf "${GREEN}%s${NC}\n" "$(printf '%*s' "$WIDTH" '' | tr ' ' '#')"
 echo ""
 
@@ -67,11 +67,14 @@ services:
     container_name: fast-socks5
     restart: always
     ports:
-      - "$HOST_PORT:$CONTAINER_PORT"
+      - "$HOST_PORT:$CONTAINER_PORT/tcp"
+      - "$HOST_PORT:$CONTAINER_PORT/udp"
     environment:
       - PROXY_PORT=$CONTAINER_PORT
       - PROXY_USER=$PROXY_USER
       - PROXY_PASSWORD=$PROXY_PASSWORD
+      - ALLOW_UDP=true
+      - PUBLIC_ADDR=$IP
     logging:
       driver: "none"
 EOF
@@ -88,16 +91,21 @@ docker compose up -d --build --remove-orphans --force-recreate >/dev/null 2>&1
 echo ""
 printf "${YELLOW}%s${NC}\n" "$(printf '%*s' "$WIDTH" '' | tr ' ' '=')"
 echo ""
-center_text "$(printf "${GREEN}Telegram Fast Socks5 Proxy Information${NC}")"
+center_text "$(printf "${GREEN}⚡ Telegram Fast Socks5 Proxy Information ⚡${NC}")"
 echo ""
-center_text "$(printf "${BLUE}tg://socks?server=$IP&port=$HOST_PORT&user=$PROXY_USER&pass=$PROXY_PASSWORD${NC}")"
+center_text "$(printf "${BLUE}🔗 tg://socks?server=$IP&port=$HOST_PORT&user=$PROXY_USER&pass=$PROXY_PASSWORD${NC}")"
 echo ""
 printf "${YELLOW}%s${NC}\n" "$(printf '%*s' "$WIDTH" '' | tr ' ' '=')"
 echo ""
-printf "${GREEN}Fast Socks5 Proxy Information:${NC}\n"
-printf "  Server IP: ${BLUE}%s${NC}\n" "$IP"
-printf "  Port: ${BLUE}%s${NC}\n" "$HOST_PORT"
-printf "  Username: ${BLUE}%s${NC}\n" "$PROXY_USER"
-printf "  Password: ${BLUE}%s${NC}\n" "$PROXY_PASSWORD"
+printf "${GREEN}🚀 Fast Socks5 Proxy Information:${NC}\n"
+printf "  🌐 ${WHITE}Server IP:${NC} ${BLUE}%s${NC}\n" "$IP"
+printf "  🚪 ${WHITE}Port:${NC} ${BLUE}%s${NC}\n" "$HOST_PORT"
+printf "  👤 ${WHITE}Username:${NC} ${BLUE}%s${NC}\n" "$PROXY_USER"
+printf "  🔑 ${WHITE}Password:${NC} ${BLUE}%s${NC}\n" "$PROXY_PASSWORD"
+printf "  📡 ${WHITE}Protocols:${NC} ${GREEN}TCP ✅${NC} ${GREEN}UDP ✅${NC}\n"
+printf "  📝 ${WHITE}Logging:${NC} ${RED}Disabled${NC}\n"
 echo ""
-printf "Configuration directory: ${YELLOW}%s${NC}\n" "$WORKDIR"
+printf "${YELLOW}%s${NC}\n" "$(printf '%*s' "$WIDTH" '' | tr ' ' '=')"
+echo ""
+printf "⚙️ ${WHITE}Configuration directory:${NC} ${YELLOW}%s${NC}\n" "$WORKDIR"
+echo ""
