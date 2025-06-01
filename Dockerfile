@@ -41,8 +41,7 @@ COPY --from=builder /app/target/release/examples/udp_client /usr/local/bin/fast-
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Make both executable
-RUN chmod +x /usr/local/bin/fast-socks5-server && \
-    chmod +x /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/fast-socks5-* /usr/local/bin/entrypoint.sh
 
 # Switch to non-root user
 USER socks5
