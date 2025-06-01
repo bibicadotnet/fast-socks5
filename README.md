@@ -35,5 +35,5 @@ sock.close()
 ```
 - Kết quả trả về `UDP NO` hoặc `UDP OK`
 
-# Tác giả
+## Tác giả
 - [dizda](https://github.com/dizda)
