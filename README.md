@@ -3,10 +3,10 @@
 
 Fast SOCKS5 TCP and UDP client/server library for Rust async (Tokio)
 
-- Hiệu năng cao, nhẹ, nhanh, an toàn, và dễ tích hợp 
-- Được duy trì bởi anyip.io
+- Hiệu năng cao, nhẹ, nhanh
 - Hỗ trợ UDP
-- Phiên bản docker mặc định tắt tất cả logs từ hệ thống
+- Được duy trì bởi anyip.io
+- Phiên bản docker mặc định **tắt tất cả logs từ hệ thống**
 
 ### Cài đặt nhanh tự động, ngẫu nhiên `PORT` `USER` `PASS` và bật `UDP`
 ```
