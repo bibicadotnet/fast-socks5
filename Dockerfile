@@ -38,8 +38,5 @@ RUN chmod +x /usr/local/bin/fast-socks5-server && \
 # Switch to non-root user
 USER socks5
 
-# Expose port 2324
-EXPOSE 2324
-
 # Set entrypoint
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
