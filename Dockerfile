@@ -14,12 +14,7 @@ WORKDIR /app
 COPY . .
 
 # Build with release optimization
-RUN set -ex && \
-    cargo build --release --example server --quiet && \
-    cargo build --release --example custom_auth_server --quiet && \
-    cargo build --release --example router --quiet && \
-    cargo build --release --example client --quiet && \
-    cargo build --release --example udp_client --quiet
+RUN cargo build --release --example server --quiet 2>/dev/null
 
 # Runtime stage - Alpine minimal nhưng đầy đủ tính năng
 FROM alpine:latest
@@ -32,16 +27,13 @@ RUN apk add --no-cache --quiet \
 
 # Copy the binary from builder
 COPY --from=builder /app/target/release/examples/server /usr/local/bin/fast-socks5-server
-COPY --from=builder /app/target/release/examples/custom_auth_server /usr/local/bin/fast-socks5-custom-auth
-COPY --from=builder /app/target/release/examples/router /usr/local/bin/fast-socks5-router
-COPY --from=builder /app/target/release/examples/client /usr/local/bin/fast-socks5-client
-COPY --from=builder /app/target/release/examples/udp_client /usr/local/bin/fast-socks5-udp-client
 
 # Copy entrypoint script
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Make both executable
-RUN chmod +x /usr/local/bin/fast-socks5-* /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/fast-socks5-server && \
+    chmod +x /usr/local/bin/entrypoint.sh
 
 # Switch to non-root user
 USER socks5
