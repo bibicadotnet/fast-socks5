@@ -1,7 +1,7 @@
 [Docker Hub](https://hub.docker.com/r/bibica/fast-socks5-server-silent)
 # Fast Socks5 Proxy Silent
 
-Phiên bản docker cho bản fast-socks5 viết trên Rust của [dizda](https://github.com/dizda)
+Fast SOCKS5 TCP and UDP client/server library for Rust async (Tokio) [dizda](https://github.com/dizda)
 
 - Hiệu năng cao, nhẹ, nhanh, an toàn, và dễ tích hợp 
 - Được duy trì bởi anyip.io
