@@ -1,34 +1,27 @@
-# Build stage với static linking
 FROM rust:1.75-alpine AS builder
 
-RUN apk add --no-cache musl-dev pkgconfig openssl-dev
-
-# Add musl target
-RUN rustup target add x86_64-unknown-linux-musl
+RUN apk add --no-cache --quiet musl-dev pkgconfig openssl-dev
 
 WORKDIR /app
 
-# Copy source
 COPY . .
 
-# Build static binary (remove problematic flags first)
-ENV RUSTFLAGS="-C opt-level=z -C target-cpu=generic -C panic=abort -C codegen-units=1 -C lto=fat"
-RUN cargo build --release --example server --target x86_64-unknown-linux-musl --quiet && \
-    cargo build --release --example docker_server --target x86_64-unknown-linux-musl --quiet && \
-    strip target/x86_64-unknown-linux-musl/release/examples/server && \
-    strip target/x86_64-unknown-linux-musl/release/examples/docker_server
+RUN cargo build --release --example server --quiet 2>/dev/null && \
+    strip /app/target/release/examples/server
 
-# Runtime stage - scratch (0 MB base)
-FROM scratch
+FROM alpine:3.19.7
 
-# Copy CA certs for HTTPS
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+RUN apk add --no-cache ca-certificates && \
+    addgroup -g 1000 socks5 2>/dev/null && \
+    adduser -D -s /bin/sh -u 1000 -G socks5 socks5 2>/dev/null && \
+    rm -rf /var/cache/apk/*
 
-# Copy static binaries
-COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/examples/server /fast-socks5-server
-COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/examples/docker_server /docker-entrypoint
+COPY --from=builder /app/target/release/examples/server /usr/local/bin/fast-socks5-server
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# Use numeric user ID (no /etc/passwd in scratch)
-USER 65534:65534
+RUN chmod +x /usr/local/bin/fast-socks5-server && \
+    chmod +x /usr/local/bin/entrypoint.sh
 
-ENTRYPOINT ["/docker-entrypoint"]
+USER socks5
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
