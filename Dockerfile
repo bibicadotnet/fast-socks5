@@ -1,30 +1,33 @@
-# Highly optimized Dockerfile for fast-socks5 server
+# Build stage với static linking
 FROM rust:1.75-alpine AS builder
 
-# Install minimal build dependencies
 RUN apk add --no-cache musl-dev pkgconfig openssl-dev
 
 WORKDIR /app
 
-# Copy all source code (including examples/docker_server.rs)
+# Copy source
 COPY . .
 
-# Build with aggressive size optimizations
-ENV RUSTFLAGS="-C opt-level=z -C target-cpu=generic -C panic=abort -C codegen-units=1 -C lto=fat"
-RUN cargo build --release --example server --quiet && \
-    cargo build --release --example docker_server --quiet && \
-    strip target/release/examples/server && \
-    strip target/release/examples/docker_server
+# Build static binary
+ENV RUSTFLAGS="-C opt-level=z -C target-cpu=generic -C panic=abort -C codegen-units=1 -C lto=fat -C target-feature=+crt-static"
+ENV PKG_CONFIG_ALLOW_CROSS=1
+ENV OPENSSL_STATIC=true
+RUN cargo build --release --example server --target x86_64-unknown-linux-musl --quiet && \
+    cargo build --release --example docker_server --target x86_64-unknown-linux-musl --quiet && \
+    strip target/x86_64-unknown-linux-musl/release/examples/server && \
+    strip target/x86_64-unknown-linux-musl/release/examples/docker_server
 
-# Use static distroless for smallest size
-FROM gcr.io/distroless/static-debian12
+# Runtime stage - scratch (0 MB base)
+FROM scratch
 
-# Copy both binaries
-COPY --from=builder /app/target/release/examples/server /fast-socks5-server
-COPY --from=builder /app/target/release/examples/docker_server /docker-entrypoint
+# Copy CA certs for HTTPS
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
-# Use nonroot user from distroless
-USER nonroot:nonroot
+# Copy static binaries
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/examples/server /fast-socks5-server
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/examples/docker_server /docker-entrypoint
 
-# Use Rust entrypoint wrapper for env vars support
+# Use numeric user ID (no /etc/passwd in scratch)
+USER 65534:65534
+
 ENTRYPOINT ["/docker-entrypoint"]
