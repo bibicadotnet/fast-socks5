@@ -1,27 +1,27 @@
 FROM rust:1.75-alpine AS builder
 
-RUN apk add --no-cache --quiet musl-dev pkgconfig openssl-dev
+RUN apk add --no-cache musl-dev pkgconfig openssl-dev
 
 WORKDIR /app
 
-COPY . .
+# Copy project files
+COPY Cargo.toml ./
+COPY src ./src
+COPY examples ./examples
 
-RUN cargo build --release --example server --quiet 2>/dev/null && \
-    strip /app/target/release/examples/server
+# Build statically with musl
+RUN rustup target add x86_64-unknown-linux-musl && \
+    cargo build --release --example server --target x86_64-unknown-linux-musl && \
+    cargo build --release --example docker_server --target x86_64-unknown-linux-musl
 
-FROM alpine:3.19.7
+# Strip binaries to reduce size
+RUN strip target/x86_64-unknown-linux-musl/release/examples/server && \
+    strip target/x86_64-unknown-linux-musl/release/examples/docker_server
 
-RUN apk add --no-cache ca-certificates && \
-    addgroup -g 1000 socks5 2>/dev/null && \
-    adduser -D -s /bin/sh -u 1000 -G socks5 socks5 2>/dev/null && \
-    rm -rf /var/cache/apk/*
+# Minimal final image
+FROM scratch
 
-COPY --from=builder /app/target/release/examples/server /usr/local/bin/fast-socks5-server
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/examples/server /fast-socks5-server
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/examples/docker_server /entrypoint
 
-RUN chmod +x /usr/local/bin/fast-socks5-server && \
-    chmod +x /usr/local/bin/entrypoint.sh
-
-USER socks5
-
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/entrypoint"]
