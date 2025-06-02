@@ -46,10 +46,10 @@ services:
     image: bibica/fast-socks5-server-silent
     container_name: fast-socks5
     restart: always
-    environment:
-      - AUTH_MODE=no-auth
     ports:
       - "2324:2324"
+    environment:
+      - AUTH_MODE=no-auth
 ```
 
 * Bật chạy
