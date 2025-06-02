@@ -12,7 +12,7 @@ Fast Socks5 Proxy Silent là bản chạy trên docker của [fast-socks5](https
 * Hiệu năng cao, nhẹ, nhanh
 * Hỗ trợ UDP tương tự bản Rust
 * Thử nghiệm trên Oracle E2.1.Micro, khi chạy cường độ cao, dùng ~ **4MB RAM** và tối đa ~2**0% CPU**, trung bình ~**10% CPU**
-* Sử dụng tài nguyên RAM, CPU khá ít so với các sản phẩm khác
+* Tốc độ download khi thử nghiệm trên Telegram rất ấn tượng
 * Mặc định **tắt tất cả logs từ hệ thống**, bất kể log gì
 * Chỉ build phần [server](https://github.com/dizda/fast-socks5/blob/master/examples/server.rs) giúp bản images nhẹ hơn **(\~ 1.5MB)**
 
