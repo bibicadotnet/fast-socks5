@@ -1,10 +1,10 @@
 name: Build and Push Docker Image
 
 on:
-  schedule:
+#  schedule:
     # Tự động chạy hàng ngày vào 0h theo múi giờ Việt Nam (UTC+7)
 #    - cron: "0 17 * * *"
-#  workflow_dispatch: # Cho phép chạy thủ công nếu cần
+  workflow_dispatch: # Cho phép chạy thủ công nếu cần
 
 jobs:
   build-and-push:
