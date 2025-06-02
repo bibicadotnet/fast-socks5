@@ -29,13 +29,14 @@ wget -qO fast-socks5.sh https://go.bibica.net/fast-socks5 && sudo bash fast-sock
 * Sau ít phút nhận được đầy đủ thông tin sử dụng, đỡ phải nhìn các cấu hình phức tạp
 
 ```
-🚀 Fast Socks5 Proxy Information:
-  🌐 Server IP: 165.123.164.165
-  🚪 Port: 11135
-  👤 Username: nV8PRJ0kXZmb
-  🔑 Password: SMl43P3CstFP2Vmy
+🚀 Fast Socks5 Proxy Configuration
+  🌐 Server IP: 165.1.64.65
+  🚪 Port: 18702
+  👤 Username: StpUCK5cFV3q
+  🔑 Password: 0kdUMTzeuUUyTTzK
   📡 Protocols: TCP ✅ UDP ✅
   📝 Logging: Disabled
+  🔍 Status: Active
 ```
 
 ---
