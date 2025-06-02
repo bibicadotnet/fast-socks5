@@ -5,6 +5,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+WHITE='\033[1;37m'
 NC='\033[0m' # No Color
 
 # Get terminal width
@@ -87,6 +88,35 @@ docker rm -f fast-socks5 >/dev/null 2>&1
 echo "Starting Fast Socks5 service..."
 docker compose up -d --build --remove-orphans --force-recreate >/dev/null 2>&1
 
+# Wait for service to start
+sleep 1
+
+# Check if SOCKS5 proxy is working
+echo -e "Validating SOCKS5 proxy connection..."
+PROXY_URL="socks5h://$PROXY_USER:$PROXY_PASSWORD@$IP:$HOST_PORT"
+CHECK_IP=$(curl -4 -s --connect-timeout 10 --max-time 15 --proxy $PROXY_URL https://ifconfig.me 2>/dev/null)
+
+if [ "$CHECK_IP" = "$IP" ]; then
+    TCP_STATUS="${GREEN}✅${NC}"
+    UDP_STATUS="${GREEN}✅${NC}"
+    PROXY_STATUS="${GREEN}Active${NC}"
+    STATUS_MESSAGE=""
+else
+    TCP_STATUS="${YELLOW}✗${NC}"
+    UDP_STATUS="${YELLOW}✗${NC}"
+    PROXY_STATUS="${YELLOW}Configured but not working${NC}"
+    STATUS_MESSAGE="\n${YELLOW}✗ Troubleshooting Guide ✗${NC}\n"
+    STATUS_MESSAGE+="The SOCKS5 proxy has been successfully configured but the TCP test failed.\n"
+    STATUS_MESSAGE+="Possible causes:\n"
+    STATUS_MESSAGE+="  - The port ${YELLOW}$HOST_PORT${NC} is blocked by the VPS firewall\n"
+    STATUS_MESSAGE+="  - Cloud provider-level firewall (AWS, GCP, Oracle, Azure, etc.) blocking external access\n"
+    STATUS_MESSAGE+="  - The proxy service failed to start properly\n\n"
+    STATUS_MESSAGE+="Recommended actions:\n"
+    STATUS_MESSAGE+="  - Check your server’s firewall configuration\n"
+    STATUS_MESSAGE+="  - Open port ${YELLOW}$HOST_PORT${NC} in your cloud provider’s dashboard\n"
+    STATUS_MESSAGE+="  - Verify the proxy container is running: ${YELLOW}docker ps${NC}\n"
+fi
+
 # Display results
 echo ""
 printf "${YELLOW}%s${NC}\n" "$(printf '%*s' "$WIDTH" '' | tr ' ' '=')"
@@ -97,14 +127,15 @@ center_text "$(printf "${BLUE}🔗 tg://socks?server=$IP&port=$HOST_PORT&user=$P
 echo ""
 printf "${YELLOW}%s${NC}\n" "$(printf '%*s' "$WIDTH" '' | tr ' ' '=')"
 echo ""
-printf "${GREEN}🚀 Fast Socks5 Proxy Information:${NC}\n"
+printf "${GREEN}🚀 Fast Socks5 Proxy Configuration${NC}\n"
 printf "  🌐 ${WHITE}Server IP:${NC} ${BLUE}%s${NC}\n" "$IP"
 printf "  🚪 ${WHITE}Port:${NC} ${BLUE}%s${NC}\n" "$HOST_PORT"
 printf "  👤 ${WHITE}Username:${NC} ${BLUE}%s${NC}\n" "$PROXY_USER"
 printf "  🔑 ${WHITE}Password:${NC} ${BLUE}%s${NC}\n" "$PROXY_PASSWORD"
-printf "  📡 ${WHITE}Protocols:${NC} ${GREEN}TCP ✅${NC} ${GREEN}UDP ✅${NC}\n"
+printf "  📡 ${WHITE}Protocols:${NC} TCP %b UDP %b\n" "$TCP_STATUS" "$UDP_STATUS"
 printf "  📝 ${WHITE}Logging:${NC} ${RED}Disabled${NC}\n"
-echo ""
+printf "  🔍 ${WHITE}Status:${NC} %b\n" "$PROXY_STATUS"
+echo -e "$STATUS_MESSAGE"
 printf "${YELLOW}%s${NC}\n" "$(printf '%*s' "$WIDTH" '' | tr ' ' '=')"
 echo ""
 printf "⚙️ ${WHITE}Configuration directory:${NC} ${YELLOW}%s${NC}\n" "$WORKDIR"
