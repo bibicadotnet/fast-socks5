@@ -123,7 +123,7 @@ services:
       - PROXY_USER=nV8PRJ0kXZmb
       - PROXY_PASSWORD=SMl43P3CstFP2Vmy
       - ALLOW_UDP=true
-      - PUBLIC_ADDR: 1.2.3.4 # Thay bằng địa chỉ public VPS
+      - PUBLIC_ADDR=1.2.3.4 # Thay bằng địa chỉ public VPS
     logging:
       driver: "none"
 ```
@@ -146,6 +146,5 @@ services:
 ```
 docker stats fast-socks5
 ```
-
 ## Tác giả
 - [dizda](https://github.com/dizda)
