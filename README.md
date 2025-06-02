@@ -16,7 +16,7 @@ Fast Socks5 Proxy Silent là bản chạy trên docker của fast-socks5 (bản 
 ```
 wget -qO fast-socks5.sh https://go.bibica.net/fast-socks5 && sudo bash fast-socks5.sh
 ```
-- Sau ít phút nhận được đầy đủ thông tin sử dụng, dùng cho tiện, đỡ phải cài đặt cấu hình thủ công
+- Sau ít phút nhận được đầy đủ thông tin sử dụng, dùng cho tiện, đỡ phải nhìn các cấu hình phức tạp
 ```
 🚀 Fast Socks5 Proxy Information:
   🌐 Server IP: 165.123.164.165
