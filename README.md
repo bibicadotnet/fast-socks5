@@ -6,23 +6,27 @@ Fast SOCKS5 TCP and UDP client/server library for Rust async (Tokio)
 
 Fast Socks5 Proxy Silent là bản chạy trên docker của fast-socks5 (bản gốc chạy qua Rust)
 
+## Docker vesion
+
+* Cài đặt nhanh, cấu hình tương tự các docker socks thông dụng
 * Hiệu năng cao, nhẹ, nhanh
-* Hỗ trợ UDP
+* Hỗ trợ UDP tương tự bản Rust
+* Thử nghiệm trên Oracle E2.1.Micro, khi chạy cường độ cao, dùng ~ **4MB RAM** và tối đa ~2**0% CPU**, trung bình ~**10% CPU**
 * Sử dụng tài nguyên RAM, CPU khá ít so với các sản phẩm khác
-* Phiên bản docker mặc định **tắt tất cả logs từ hệ thống**
-* Dùng nhu cầu socks cơ bản, chỉ build phần [server](https://github.com/dizda/fast-socks5/blob/master/examples/server.rs) giúp bản images nhẹ hơn (\~ 5MB)
+* Mặc định **tắt tất cả logs từ hệ thống**, bất kể log gì
+* Chỉ build phần [server](https://github.com/dizda/fast-socks5/blob/master/examples/server.rs) giúp bản images nhẹ hơn **(\~ 1.5MB)**
 
 ---
 
 ### Cài đặt tự động
 
-* Bash script bên dưới tạo cấu hình ngẫu nhiên `PORT`, `USER`, `PASS`, bật `UDP`, tắt thêm logs docker
+* Bash script bên dưới tạo cấu hình ngẫu nhiên `PORT`, `USER`, `PASS`, bật `UDP`, tắt thêm **logs từ docker**
 
 ```bash
 wget -qO fast-socks5.sh https://go.bibica.net/fast-socks5 && sudo bash fast-socks5.sh
 ```
 
-* Sau ít phút nhận được đầy đủ thông tin sử dụng, dùng cho tiện, đỡ phải nhìn các cấu hình phức tạp
+* Sau ít phút nhận được đầy đủ thông tin sử dụng, đỡ phải nhìn các cấu hình phức tạp
 
 ```
 🚀 Fast Socks5 Proxy Information:
@@ -89,7 +93,7 @@ curl --proxy socks5h://myuser:mypass@127.0.0.1:2324 https://ifconfig.me
 
 ---
 
-> **🐳 3. Xác thực người dùng + Bật hỗ trợ UDP**
+> **🐳 3. Xác thực người dùng + bật hỗ trợ UDP**
 
 ```yaml
 services:
@@ -132,7 +136,7 @@ sock.close()
 
 ---
 
-> **🐳 4. Xác thực người dùng + Bật hỗ trợ UDP + ngẫu nhiên tất cả port, user + tắt log docker...**
+> **🐳 4. Xác thực người dùng + bật hỗ trợ UDP + ngẫu nhiên tất cả port, user + tắt log docker...**
 
 * Đây là cấu hình dùng trên bản tự động:
 
