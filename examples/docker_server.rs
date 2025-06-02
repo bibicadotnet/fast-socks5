@@ -15,7 +15,7 @@ fn main() {
     let request_timeout = env::var("REQUEST_TIMEOUT").unwrap_or_else(|_| "10".to_string());
     let skip_auth = env::var("SKIP_AUTH").unwrap_or_else(|_| "false".to_string());
 
-    // Build command arguments
+    // Build base command arguments
     let mut args = vec![
         "--listen-addr".to_string(),
         format!("0.0.0.0:{}", proxy_port),
@@ -23,9 +23,11 @@ fn main() {
         request_timeout,
     ];
 
-    // Add UDP support if enabled
+    // Add UDP support if enabled and public_addr is provided
     if allow_udp.to_lowercase() == "true" && !public_addr.is_empty() {
-        args.extend_from_slice(&["--allow-udp".to_string(), "--public-addr".to_string(), public_addr]);
+        args.push("--allow-udp".to_string());
+        args.push("--public-addr".to_string());
+        args.push(public_addr);
     }
 
     // Add skip-auth if enabled
@@ -33,27 +35,32 @@ fn main() {
         args.push("--skip-auth".to_string());
     }
 
-    // Configure authentication
+    // Configure authentication mode
     if auth_mode == "no-auth" {
         args.push("no-auth".to_string());
     } else {
-        let proxy_user = env::var("PROXY_USER").expect("PROXY_USER environment variable required");
-        let proxy_password = env::var("PROXY_PASSWORD").expect("PROXY_PASSWORD environment variable required");
-        
-        args.extend_from_slice(&[
-            "password".to_string(),
-            "--username".to_string(),
-            proxy_user,
-            "--password".to_string(),
-            proxy_password,
-        ]);
+        // For password mode, check if credentials are provided
+        match (env::var("PROXY_USER"), env::var("PROXY_PASSWORD")) {
+            (Ok(user), Ok(password)) => {
+                args.push("password".to_string());
+                args.push("--username".to_string());
+                args.push(user);
+                args.push("--password".to_string());
+                args.push(password);
+            }
+            _ => {
+                eprintln!("Error: PROXY_USER and PROXY_PASSWORD environment variables are required for password authentication");
+                std::process::exit(1);
+            }
+        }
     }
 
-    // Execute the server
-    let status = Command::new("/fast-socks5-server")
+    // Execute the server - sử dụng đường dẫn chính xác
+    let status = Command::new("/usr/local/bin/fast-socks5-server")
         .args(&args)
         .status()
-        .expect("Failed to execute server");
+        .expect("Failed to execute fast-socks5-server");
 
+    // Exit with the same code as the server
     std::process::exit(status.code().unwrap_or(1));
 }
