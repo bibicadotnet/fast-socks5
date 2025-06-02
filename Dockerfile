@@ -1,25 +1,23 @@
-FROM rust:1.75-alpine AS builder
+FROM rust:1.87.0-alpine3.22 AS builder
 
-RUN apk add --no-cache --quiet \
-    musl-dev \
-    pkgconfig \
-    openssl-dev
+RUN apk add --no-cache musl-dev pkgconfig
 
 WORKDIR /app
+
 COPY . .
 
-RUN RUSTFLAGS="-C link-arg=-s" \
-    cargo build --release --example server --quiet 2>/dev/null && \
-    strip /app/target/release/examples/server
+RUN rustup target add x86_64-unknown-linux-musl
 
-FROM alpine:3.19.7
+RUN cargo build --release --target x86_64-unknown-linux-musl --examples && \
+    strip /app/target/x86_64-unknown-linux-musl/release/examples/server && \
+    strip /app/target/x86_64-unknown-linux-musl/release/examples/docker_server
 
-RUN apk add --no-cache --quiet ca-certificates && \
-    addgroup -g 1000 socks5 && \
-    adduser -D -s /bin/sh -u 1000 -G socks5 socks5
 
-COPY --from=builder /app/target/release/examples/server /usr/local/bin/fast-socks5-server
-COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
+FROM scratch
 
-USER socks5
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/examples/server /usr/local/bin/fast-socks5-server
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/examples/docker_server /usr/local/bin/docker_server
+
+USER 65534:65534
+
+ENTRYPOINT ["/usr/local/bin/docker_server"]
