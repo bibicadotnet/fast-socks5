@@ -4,7 +4,7 @@
 
 Fast SOCKS5 TCP and UDP client/server library for Rust async (Tokio)
 
-Fast Socks5 Proxy Silent là bản chạy trên docker của fast-socks5 (bản gốc chạy qua Rust)
+Fast Socks5 Proxy Silent là bản chạy trên docker của [fast-socks5](https://github.com/dizda/fast-socks5) (bản gốc chạy qua Rust)
 
 ## Docker vesion
 
