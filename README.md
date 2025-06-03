@@ -19,6 +19,7 @@ Fast Socks5 Proxy Silent là bản chạy trên docker của [fast-socks5](https
 * Tốc độ download khi thử nghiệm trên Telegram rất ấn tượng
 * Mặc định **tắt tất cả logs từ hệ thống**, bất kể log gì
 * Chỉ build phần [server](https://github.com/dizda/fast-socks5/blob/master/examples/server.rs) giúp bản images nhẹ hơn **(\~ 1.5MB)**
+* **Beta thử nghiệm `AUTH_ONCE` xác thực 1 lần**
 
 ---
 
@@ -164,6 +165,73 @@ services:
       driver: "none"
 ```
 
+> **🐳 5. Xác thực người dùng + hỗ trợ đăng nhập 1 lần + bật hỗ trợ UDP + ngẫu nhiên tất cả port, user + tắt log docker...
+
+* Tính năng beta `AUTH_ONCE=true`: xác thực một lần (học theo `MicroSocks`)
+* Lần kết nối đầu tiên: Client phải xác thực bằng username/password
+* Kết nối thành công: IP được thêm vào whitelist
+* Các lần kết nối sau: Client từ IP đó sẽ được bypass authentication tự động
+* Browsers/Apps: Các ứng dụng không hỗ trợ SOCKS auth có thể truy cập sau khi được whitelist
+
+```yaml
+services:
+  fast-socks5-auth-once:
+    image: bibica/fast-socks5-server-silent-auth-once
+    container_name: fast-socks5-auth-once
+    restart: always
+    ports:
+      - "15402:12426/tcp"
+      - "15402:12426/udp"
+    environment:
+      - PROXY_PORT=12426
+      - PROXY_USER=StpUCK5cFV3q
+      - PROXY_PASSWORD=SMl43P3CstFP2Vmy
+      - ALLOW_UDP=true
+      - PUBLIC_ADDR=1.2.3.4 # Thay bằng địa chỉ public VPS
+      - AUTH_ONCE=true
+    logging:
+      driver: "none"
+```
+
+* Kiểm tra `TCP`, `UDP`, `AUTH_ONCE` qua `socks5_udp_test.py`
+
+```bash
+python3 socks5_udp_test.py 1.2.3.4 15402 StpUCK5cFV3q SMl43P3CstFP2Vmy
+```
+1. Lần đầu sử dụng USERNAME/PASSWORD
+
+```
+=== SOCKS5 UDP Associate Test ===
+Connecting to 1.2.3.4:12426...
+✓ TCP connection established
+Sending authentication methods...
+✓ Server selected USERNAME/PASSWORD authentication
+Sending credentials...
+✓ Authentication successful
+Sending UDP Associate request...
+Waiting for UDP Associate response...
+Response: VER=5, REP=0, RSV=0, ATYP=1
+✓ UDP Associate successful!
+✓ UDP relay server: 1.2.3.4:39904
+```More actions
+2. Từ lần 2 NO AUTHENTICATION (Bypass authentication tự động)
+```
+=== SOCKS5 UDP Associate Test ===
+Connecting to 1.2.3.4:14268...
+✓ TCP connection established
+Sending authentication methods...
+✓ Server selected NO AUTHENTICATION
+Sending UDP Associate request...
+Waiting for UDP Associate response...
+Response: VER=5, REP=0, RSV=0, ATYP=1
+✓ UDP Associate successful!
+✓ UDP relay server: 146.235.239.173:52311
+```
+`AUTH_ONCE=true` là tính năng thử nghiệm viết thêm so với bản gốc, không chắc chạy có lỗi gì không
+
+IP đưa vào danh sách trắng được lưu mặc định trong RAM, tất cả IP whitelist sẽ bị mất khi server (container) dừng hoặc crash
+
+---
 
 ## Biến môi trường hỗ trợ (Environment Variables)
 
