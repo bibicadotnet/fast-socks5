@@ -213,8 +213,10 @@ Waiting for UDP Associate response...
 Response: VER=5, REP=0, RSV=0, ATYP=1
 ✓ UDP Associate successful!
 ✓ UDP relay server: 1.2.3.4:39904
-```More actions
+```
+
 2. Từ lần 2 NO AUTHENTICATION (Bypass authentication tự động)
+
 ```
 === SOCKS5 UDP Associate Test ===
 Connecting to 1.2.3.4:14268...
@@ -227,9 +229,9 @@ Response: VER=5, REP=0, RSV=0, ATYP=1
 ✓ UDP Associate successful!
 ✓ UDP relay server: 146.235.239.173:52311
 ```
-`AUTH_ONCE=true` là tính năng thử nghiệm viết thêm so với bản gốc, không chắc chạy có lỗi gì không
 
-IP đưa vào danh sách trắng được lưu mặc định trong RAM, tất cả IP whitelist sẽ bị mất khi server (container) dừng hoặc crash
+- `AUTH_ONCE=true` là tính năng thử nghiệm viết thêm so với bản gốc, không chắc chạy có lỗi gì không
+- IP đưa vào danh sách trắng được lưu mặc định trong RAM, tất cả IP whitelist sẽ bị mất khi server (container) dừng hoặc crash
 
 ---
 
