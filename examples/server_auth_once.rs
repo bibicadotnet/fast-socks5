@@ -191,64 +191,102 @@ async fn serve_socks5(
     client_ip: IpAddr,
     auth_state: AuthState
 ) -> Result<(), SocksError> {
+    // Tạo socket dự phòng để fallback nếu cần
+    let fallback_socket = socket.try_clone().map_err(|e| {
+        error!("Failed to clone socket: {}", e);
+        SocksError::Io(e)
+    })?;
     
-    debug!("Client {} connecting", client_ip);
+    // Kiểm tra whitelist status
+    let is_whitelisted = if opt.auth_once {
+        auth_state.is_authenticated(&client_ip).await
+    } else {
+        false
+    };
 
-    // CRITICAL FIX: Handle authentication method selection properly
-    let should_bypass_auth = opt.auth_once && 
-        matches!(opt.auth, AuthMode::Password { .. }) && 
-        auth_state.is_authenticated(&client_ip).await;
-
-    let (proto, cmd, target_addr) = if should_bypass_auth {
-        // IP is whitelisted - accept NO authentication methods
-        info!("IP {} is whitelisted - accepting with no authentication", client_ip);
-        
-        if opt.skip_auth {
-            Socks5ServerProtocol::skip_auth_this_is_not_rfc_compliant(socket)
-        } else {
-            // Force client to use no-auth by only advertising NO_AUTH method
-            Socks5ServerProtocol::accept_no_auth(socket).await?
+    // Thử NO_AUTH trước nếu IP đã whitelisted
+    let (proto, cmd, target_addr) = if is_whitelisted {
+        match Socks5ServerProtocol::accept_no_auth(socket).await {
+            Ok(proto) => {
+                debug!("IP {} using NO_AUTH (whitelisted)", client_ip);
+                proto
+            },
+            Err(e) => {
+                debug!("Fallback to auth for whitelisted IP {}: {}", client_ip, e);
+                handle_auth_flow(opt, fallback_socket, client_ip, auth_state).await?
+            }
         }
     } else {
-        // Handle normal authentication flow
-        match &opt.auth {
-            AuthMode::NoAuth => {
-                debug!("Using no-auth method for {}", client_ip);
-                if opt.skip_auth {
-                    Socks5ServerProtocol::skip_auth_this_is_not_rfc_compliant(socket)
-                } else {
-                    Socks5ServerProtocol::accept_no_auth(socket).await?
-                }
-            }
-            AuthMode::Password { username, password } => {
-                debug!("Requiring password authentication for {}", client_ip);
-                
-                let username_clone = username.clone();
-                let password_clone = password.clone();
-                let client_ip_for_closure = client_ip;
-                
-                let (proto, auth_success) = Socks5ServerProtocol::accept_password_auth(
-                    socket, 
-                    move |user, pass| {
-                        let is_valid = user == username_clone && pass == password_clone;
-                        debug!("Password auth attempt for {} - user: '{}', valid: {}", 
-                               client_ip_for_closure, user, is_valid);
-                        is_valid
-                    }
-                ).await?;
+        handle_auth_flow(opt, socket, client_ip, auth_state).await?
+    }
+    .read_command()
+    .await?
+    .resolve_dns()
+    .await?;
 
-                // If auth was successful and auth_once is enabled, add IP to whitelist
-                if auth_success && opt.auth_once {
-                    auth_state.add_authenticated_ip(client_ip).await;
-                    let count = auth_state.authenticated_count().await;
-                    info!("Authentication successful for {}. Total whitelisted IPs: {}", 
-                          client_ip, count);
+    // Xử lý lệnh SOCKS
+    match cmd {
+        Socks5Command::TCPConnect => {
+            debug!("Handling TCP connect for {} to {}", client_ip, target_addr);
+            run_tcp_proxy(proto, &target_addr, opt.request_timeout, false).await?;
+        }
+        Socks5Command::UDPAssociate if opt.allow_udp => {
+            debug!("Handling UDP associate for {} to {}", client_ip, target_addr);
+            let reply_ip = opt.public_addr.context("invalid reply ip")?;
+            run_udp_proxy(proto, &target_addr, None, reply_ip, None).await?;
+        }
+        _ => {
+            warn!("Unsupported command from {}: {:?}", client_ip, cmd);
+            proto.reply_error(&ReplyError::CommandNotSupported).await?;
+            return Err(ReplyError::CommandNotSupported.into());
+        }
+    };
+    
+    debug!("Connection completed for {}", client_ip);
+    Ok(())
+}
+
+async fn handle_auth_flow(
+    opt: &Opt,
+    socket: tokio::net::TcpStream,
+    client_ip: IpAddr,
+    auth_state: AuthState,
+) -> Result<Socks5ServerProtocol, SocksError> {
+    match &opt.auth {
+        AuthMode::NoAuth if opt.skip_auth => {
+            debug!("Using skip-auth method for {}", client_ip);
+            Ok(Socks5ServerProtocol::skip_auth_this_is_not_rfc_compliant(socket))
+        }
+        AuthMode::NoAuth => {
+            debug!("Using no-auth method for {}", client_ip);
+            Socks5ServerProtocol::accept_no_auth(socket).await
+        }
+        AuthMode::Password { username, password } => {
+            debug!("Requiring password authentication for {}", client_ip);
+            
+            let username_clone = username.clone();
+            let password_clone = password.clone();
+            
+            let (proto, auth_success) = Socks5ServerProtocol::accept_password_auth(
+                socket, 
+                move |user, pass| {
+                    let is_valid = user == username_clone && pass == password_clone;
+                    debug!("Auth attempt for {}: user '{}', valid: {}", 
+                          client_ip, user, is_valid);
+                    is_valid
                 }
-                
-                proto
+            ).await?;
+
+            if auth_success && opt.auth_once {
+                auth_state.add_authenticated_ip(client_ip).await;
+                let count = auth_state.authenticated_count().await;
+                info!("IP {} authenticated. Total whitelisted: {}", client_ip, count);
             }
+            
+            Ok(proto)
         }
     }
+}
     .read_command()
     .await?
     .resolve_dns()
