@@ -15,7 +15,7 @@ Fast Socks5 Proxy Silent là bản chạy trên docker của [fast-socks5](https
 * Cài đặt nhanh, cấu hình tương tự các docker socks thông dụng
 * Hiệu năng cao, nhẹ, nhanh
 * Hỗ trợ UDP tương tự bản Rust
-* Thử nghiệm trên Oracle E2.1.Micro, khi chạy cường độ cao, dùng ~ **4MB RAM** và tối đa ~2**0% CPU**, trung bình ~**10% CPU**
+* Thử nghiệm trên Oracle E2.1.Micro, khi chạy cường độ cao, dùng ~ **4MB-10MB RAM** và tối đa ~**20% CPU**, trung bình ~**10% CPU**
 * Tốc độ download khi thử nghiệm trên Telegram rất ấn tượng
 * Mặc định **tắt tất cả logs từ hệ thống**, bất kể log gì
 * Chỉ build phần [server](https://github.com/dizda/fast-socks5/blob/master/examples/server.rs) giúp bản images nhẹ hơn **(\~ 1.5MB)**
@@ -168,10 +168,10 @@ services:
 > **🐳 5. Xác thực người dùng + hỗ trợ đăng nhập 1 lần + bật hỗ trợ UDP + ngẫu nhiên tất cả port, user + tắt log docker...
 
 * Tính năng beta `AUTH_ONCE=true`: xác thực một lần (học theo `MicroSocks`)
-* Lần kết nối đầu tiên: Client phải xác thực bằng username/password
-* Kết nối thành công: IP được thêm vào whitelist
-* Các lần kết nối sau: Client từ IP đó sẽ được bypass authentication tự động
-* Browsers/Apps: Các ứng dụng không hỗ trợ SOCKS auth có thể truy cập sau khi được whitelist
+  * Lần kết nối đầu tiên: Client phải xác thực bằng username/password
+  * Kết nối thành công: IP được thêm vào whitelist
+  * Các lần kết nối sau: Client từ IP đó sẽ được bypass authentication tự động
+  * Browsers/Apps: Các ứng dụng không hỗ trợ SOCKS auth có thể truy cập sau khi được whitelist
 
 ```yaml
 services:
