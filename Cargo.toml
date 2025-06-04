@@ -1,18 +1,10 @@
 [package]
 name = "fast-socks5"
 version = "1.0.0-rc.0"
-authors = ["Jonathan Dizdarevic <dizzda@gmail.com>"]
 edition = "2021"
 license = "MIT"
 description = "Fast SOCKS5 client/server implementation written in Rust async/.await (tokio)"
 repository = "https://github.com/dizda/fast-socks5"
-categories = [
-    "asynchronous",
-    "network-programming",
-    "command-line-utilities",
-    "authentication",
-]
-keywords = ["io", "proxy", "vpn", "async", "socks"]
 
 [features]
 default = []
@@ -20,28 +12,21 @@ socks4 = []
 
 [dependencies]
 log = "0.4"
-tokio = { version = "1", features = ["io-util", "net", "time", "macros"] }
+tokio = { version = "1", features = ["full"] } # Thay bằng feature full để bao gồm mọi thứ
 anyhow = "1"
 thiserror = "1"
 tokio-stream = "0.1"
 async-trait = "0.1"
 socket2 = "0.5.8"
+structopt = "0.3" 
 
-# Dependencies for examples and tests
 [dev-dependencies]
 env_logger = "0.9"
-structopt = "0.3"
-tokio = { version = "1", features = [
-    "io-util",
-    "net",
-    "time",
-    "rt-multi-thread",
-    "macros",
-] }
 tokio-test = "0.4"
 
 [[example]]
 name = "server"
+required-features = [] 
 
 [[example]]
 name = "client"
@@ -51,3 +36,11 @@ name = "custom_auth_server"
 
 [[example]]
 name = "router"
+
+[[example]]
+name = "server_auth_once" 
+required-features = []
+
+[[example]]
+name = "docker_auth_once"
+required-features = []
