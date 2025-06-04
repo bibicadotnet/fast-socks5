@@ -231,7 +231,7 @@ Sending UDP Associate request...
 Waiting for UDP Associate response...
 Response: VER=5, REP=0, RSV=0, ATYP=1
 ✓ UDP Associate successful!
-✓ UDP relay server: 146.235.239.173:52311
+✓ UDP relay server: 1.2.3.4:52311
 ```
 
 - `AUTH_ONCE=true` là tính năng thử nghiệm viết thêm so với bản gốc, không chắc chạy có lỗi gì không
