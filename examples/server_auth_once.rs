@@ -216,7 +216,7 @@ async fn serve_socks5(
     debug!("Client {} - Whitelisted: {}", client_ip, is_whitelisted);
 
     // Handle authentication based on current state and configuration
-    let (proto, cmd, target_addr) = match (&opt.auth, is_whitelisted) {
+    let proto = match (&opt.auth, is_whitelisted) {
         // Case 1: No auth mode (regardless of whitelist status)
         (AuthMode::NoAuth, _) if opt.skip_auth => {
             debug!("Using skip-auth for {}", client_ip);
@@ -243,7 +243,7 @@ async fn serve_socks5(
             let client_ip_for_closure = client_ip;
             let auth_once = opt.auth_once;
             
-            let (proto, auth_result) = Socks5ServerProtocol::accept_password_auth(
+            let (proto, _auth_result) = Socks5ServerProtocol::accept_password_auth(
                 socket, 
                 move |user: &str, pass: &str| -> bool {
                     let is_valid = auth_state_for_closure.validate_credentials(user, pass);
@@ -259,9 +259,11 @@ async fn serve_socks5(
                 info!("Authentication successful for {}. Total whitelisted IPs: {}", client_ip, count);
             }
             
-            (proto, auth_result)
+            proto
         }
-    }
+    };
+
+    let (proto, cmd, target_addr) = proto
     .read_command()
     .await?
     .resolve_dns()
