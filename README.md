@@ -167,7 +167,7 @@ services:
       driver: "none"
 ```
 
-> **🐳 5. Xác thực người dùng + hỗ trợ đăng nhập 1 lần + bật hỗ trợ UDP + ngẫu nhiên tất cả port, user + tắt log docker...
+> 🐳 5. Xác thực người dùng + hỗ trợ đăng nhập 1 lần + bật hỗ trợ UDP + ngẫu nhiên tất cả port, user + tắt log docker...
 
 Tinh năng chủ yếu chạy cá nhân, bạn nào thích thì thử cho vui, muốn ổn định dùng bản mặc định
 
