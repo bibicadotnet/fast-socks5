@@ -341,7 +341,7 @@ impl AuthState {
     }
 
     /// Add an IP to the authenticated list
-    async fn add_authenticated_ip(&self, ip: IpAddr, ttl_seconds: Option<u64>, auth_user: Option<String>) {
+    async fn add_authenticated_ip(&self, ip: IpAddr, ttl_seconds: Option<u64>, auth_user: String) {
         let mut cache = self.cache.write().await;
         let entry = WhitelistEntry::new(ttl_seconds, auth_user);
         cache.insert(ip, entry);
@@ -633,7 +633,7 @@ async fn serve_socks5(
                     } else { 
                         None 
                     };
-                    auth_state.add_authenticated_ip(client_ip, ttl, Some(auth_user)).await;
+                    auth_state.add_authenticated_ip(client_ip, ttl, auth_user).await;
                     let count = auth_state.authenticated_count().await;
                     info!("IP {} authenticated as '{}' and whitelisted. Total active entries: {}", 
                           client_ip, auth_user, count);
