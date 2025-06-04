@@ -82,26 +82,12 @@ enum AuthMode {
 struct AuthState {
     /// Set of IP addresses that have been successfully authenticated
     authenticated_ips: Arc<RwLock<HashSet<IpAddr>>>,
-    /// Username for password authentication
-    username: String,
-    /// Password for password authentication
-    password: String,
 }
 
 impl AuthState {
-    fn new(username: String, password: String) -> Self {
+    fn new() -> Self {
         Self {
             authenticated_ips: Arc::new(RwLock::new(HashSet::new())),
-            username,
-            password,
-        }
-    }
-
-    fn new_no_auth() -> Self {
-        Self {
-            authenticated_ips: Arc::new(RwLock::new(HashSet::new())),
-            username: String::new(),
-            password: String::new(),
         }
     }
 
@@ -125,9 +111,24 @@ impl AuthState {
         ips.len()
     }
 
-    /// Validate credentials
-    fn validate_credentials(&self, user: &str, pass: &str) -> bool {
-        user == self.username && pass == self.password
+    /// Remove an IP from the authenticated list (for testing or management)
+    #[allow(dead_code)]
+    async fn remove_authenticated_ip(&self, ip: &IpAddr) -> bool {
+        let mut ips = self.authenticated_ips.write().await;
+        let removed = ips.remove(ip);
+        if removed {
+            info!("IP {} removed from whitelist", ip);
+        }
+        removed
+    }
+
+    /// Clear all authenticated IPs (for testing or management)
+    #[allow(dead_code)]
+    async fn clear_all(&self) {
+        let mut ips = self.authenticated_ips.write().await;
+        let count = ips.len();
+        ips.clear();
+        info!("Cleared {} IPs from whitelist", count);
     }
 }
 
@@ -171,14 +172,7 @@ async fn spawn_socks_server() -> Result<()> {
     }
 
     let listener = TcpListener::bind(&opt.listen_addr).await?;
-    
-    // Initialize auth state based on auth mode
-    let auth_state = match &opt.auth {
-        AuthMode::NoAuth => AuthState::new_no_auth(),
-        AuthMode::Password { username, password } => {
-            AuthState::new(username.clone(), password.clone())
-        }
-    };
+    let auth_state = AuthState::new();
 
     info!("Listen for socks connections @ {}", &opt.listen_addr);
     if opt.auth_once {
@@ -206,69 +200,49 @@ async fn serve_socks5(
     auth_state: AuthState
 ) -> Result<(), SocksError> {
     
-    // Determine authentication method based on auth_once status
-    let is_whitelisted = if opt.auth_once {
-        auth_state.is_authenticated(&client_ip).await
-    } else {
-        false
-    };
+    // CRITICAL FIX: Determine the effective authentication method BEFORE negotiation
+    let effective_auth_method = determine_effective_auth_method(opt, &client_ip, &auth_state).await;
+    
+    debug!("Client {} connecting. Effective auth method: {:?}", 
+           client_ip, effective_auth_method);
 
-    debug!("Client {} - Whitelisted: {}", client_ip, is_whitelisted);
+    // Perform authentication based on the effective method
+    let (proto, cmd, target_addr) = match effective_auth_method {
+        EffectiveAuthMethod::NoAuth => {
+            if opt.skip_auth {
+                debug!("Using skip-auth mode for {}", client_ip);
+                Socks5ServerProtocol::skip_auth_this_is_not_rfc_compliant(socket)
+            } else {
+                debug!("Using no-auth method for {}", client_ip);
+                Socks5ServerProtocol::accept_no_auth(socket).await?
+            }
+        }
+        EffectiveAuthMethod::PasswordRequired { username, password } => {
+            debug!("Requiring password authentication for {}", client_ip);
+            let (proto, auth_success) = Socks5ServerProtocol::accept_password_auth(socket, |user, pass| {
+                let is_valid = user == username && pass == password;
+                debug!("Password auth attempt for {} - user: '{}', valid: {}", 
+                       client_ip, user, is_valid);
+                is_valid
+            }).await?;
 
-    // Handle authentication based on current state and configuration
-    let proto = match (&opt.auth, is_whitelisted) {
-        // Case 1: No auth mode (regardless of whitelist status)
-        (AuthMode::NoAuth, _) if opt.skip_auth => {
-            debug!("Using skip-auth for {}", client_ip);
-            Socks5ServerProtocol::skip_auth_this_is_not_rfc_compliant(socket)
-        }
-        (AuthMode::NoAuth, _) => {
-            debug!("Using no-auth for {}", client_ip);
-            Socks5ServerProtocol::accept_no_auth(socket).await?
-        }
-        
-        // Case 2: Password auth with whitelisted IP (auth_once enabled)
-        (AuthMode::Password { .. }, true) => {
-            debug!("IP {} is whitelisted, using no-auth", client_ip);
-            // For whitelisted IPs, we advertise and use no-auth
-            Socks5ServerProtocol::accept_no_auth(socket).await?
-        }
-        
-        // Case 3: Password auth with non-whitelisted IP or auth_once disabled
-        (AuthMode::Password { .. }, false) => {
-            debug!("IP {} requires password authentication", client_ip);
-            
-            // Clone auth_state for the closure
-            let auth_state_for_closure = auth_state.clone();
-            let client_ip_for_closure = client_ip;
-            let auth_once = opt.auth_once;
-            
-            let (proto, _auth_result) = Socks5ServerProtocol::accept_password_auth(
-                socket, 
-                move |user: &str, pass: &str| -> bool {
-                    let is_valid = auth_state_for_closure.validate_credentials(user, pass);
-                    debug!("Authentication attempt for {} - Valid: {}", client_ip_for_closure, is_valid);
-                    is_valid
-                }
-            ).await?;
-            
-            // If authentication was successful and auth_once is enabled, add IP to whitelist
-            if auth_once {
+            // If auth was successful and auth_once is enabled, add IP to whitelist
+            if auth_success && opt.auth_once {
                 auth_state.add_authenticated_ip(client_ip).await;
                 let count = auth_state.authenticated_count().await;
-                info!("Authentication successful for {}. Total whitelisted IPs: {}", client_ip, count);
+                info!("Authentication successful for {}. Total whitelisted IPs: {}", 
+                      client_ip, count);
             }
             
             proto
         }
-    };
-
-    let (proto, cmd, target_addr) = proto
+    }
     .read_command()
     .await?
     .resolve_dns()
     .await?;
 
+    // Handle the command
     match cmd {
         Socks5Command::TCPConnect => {
             debug!("Handling TCP connect for {} to {}", client_ip, target_addr);
@@ -286,8 +260,41 @@ async fn serve_socks5(
         }
     };
     
-    debug!("Connection completed for {}", client_ip);
+    debug!("Connection completed successfully for {}", client_ip);
     Ok(())
+}
+
+/// Represents the effective authentication method to use for a client
+#[derive(Debug)]
+enum EffectiveAuthMethod {
+    NoAuth,
+    PasswordRequired { username: String, password: String },
+}
+
+/// Determine which authentication method should be used for this client
+async fn determine_effective_auth_method(
+    opt: &Opt,
+    client_ip: &IpAddr,
+    auth_state: &AuthState,
+) -> EffectiveAuthMethod {
+    match &opt.auth {
+        AuthMode::NoAuth => {
+            debug!("Configuration: NoAuth mode");
+            EffectiveAuthMethod::NoAuth
+        }
+        AuthMode::Password { username, password } => {
+            if opt.auth_once && auth_state.is_authenticated(client_ip).await {
+                info!("IP {} is whitelisted - bypassing authentication", client_ip);
+                EffectiveAuthMethod::NoAuth
+            } else {
+                debug!("IP {} requires password authentication", client_ip);
+                EffectiveAuthMethod::PasswordRequired {
+                    username: username.clone(),
+                    password: password.clone(),
+                }
+            }
+        }
+    }
 }
 
 fn spawn_and_log_error<F>(fut: F) -> task::JoinHandle<()>
@@ -297,7 +304,7 @@ where
     task::spawn(async move {
         match fut.await {
             Ok(()) => {}
-            Err(err) => error!("{:#}", &err),
+            Err(err) => error!("Connection error: {:#}", &err),
         }
     })
 }
