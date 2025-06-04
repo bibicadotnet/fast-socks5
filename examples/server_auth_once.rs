@@ -48,7 +48,7 @@ struct Opt {
     pub request_timeout: u64,
 
     /// Choose authentication type
-    #[structopt(subcommand, name = "auth")]
+    #[structopt(subcommand, name = "auth")] // Note that we mark a field as a subcommand
     pub auth: AuthMode,
 
     /// Don't perform the auth handshake, send directly the command request
@@ -62,10 +62,6 @@ struct Opt {
     /// Enable one-time authentication - IP whitelist after successful auth
     #[structopt(long)]
     pub auth_once: bool,
-
-    /// Time in seconds to cache whitelist status (0 = no expiry)
-    #[structopt(long, default_value = "0")]
-    pub whitelist_ttl: u64,
 }
 
 /// Choose the authentication type
@@ -81,116 +77,52 @@ enum AuthMode {
     },
 }
 
-/// Whitelist entry with optional expiry
-#[derive(Debug, Clone)]
-struct WhitelistEntry {
-    added_at: std::time::Instant,
-    ttl_seconds: Option<u64>,
-}
-
-impl WhitelistEntry {
-    fn new(ttl_seconds: Option<u64>) -> Self {
-        Self {
-            added_at: std::time::Instant::now(),
-            ttl_seconds,
-        }
-    }
-
-    fn is_expired(&self) -> bool {
-        if let Some(ttl) = self.ttl_seconds {
-            self.added_at.elapsed().as_secs() > ttl
-        } else {
-            false
-        }
-    }
-}
-
 /// Shared state for authenticated IPs
 #[derive(Debug, Clone)]
 struct AuthState {
-    /// Map of IP addresses to their whitelist entries
-    authenticated_ips: Arc<RwLock<std::collections::HashMap<IpAddr, WhitelistEntry>>>,
+    /// Set of IP addresses that have been successfully authenticated
+    authenticated_ips: Arc<RwLock<HashSet<IpAddr>>>,
 }
 
 impl AuthState {
     fn new() -> Self {
         Self {
-            authenticated_ips: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            authenticated_ips: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
-    /// Check if an IP is currently authenticated (and not expired)
+    /// Check if an IP is already authenticated
     async fn is_authenticated(&self, ip: &IpAddr) -> bool {
+        let ips = self.authenticated_ips.read().await;
+        ips.contains(ip)
+    }
+
+    /// Add an IP to the authenticated list
+    async fn add_authenticated_ip(&self, ip: IpAddr) {
         let mut ips = self.authenticated_ips.write().await;
-        
-        if let Some(entry) = ips.get(ip) {
-            if entry.is_expired() {
-                info!("IP {} whitelist entry expired, removing from cache", ip);
-                ips.remove(ip);
-                false
-            } else {
-                true
-            }
-        } else {
-            false
+        if ips.insert(ip) {
+            info!("IP {} added to whitelist after successful authentication", ip);
         }
     }
 
-    /// Add an IP to the authenticated list with optional TTL
-    async fn add_authenticated_ip(&self, ip: IpAddr, ttl_seconds: Option<u64>) {
-        let mut ips = self.authenticated_ips.write().await;
-        let entry = WhitelistEntry::new(ttl_seconds);
-        ips.insert(ip, entry);
-        
-        if let Some(ttl) = ttl_seconds {
-            info!("IP {} added to whitelist (expires in {} seconds)", ip, ttl);
-        } else {
-            info!("IP {} added to permanent whitelist", ip);
-        }
-    }
-
-    /// Get count of authenticated IPs (cleaning expired ones)
+    /// Get count of authenticated IPs (for logging)
     async fn authenticated_count(&self) -> usize {
-        let mut ips = self.authenticated_ips.write().await;
-        
-        // Clean expired entries
-        let expired_ips: Vec<IpAddr> = ips
-            .iter()
-            .filter_map(|(ip, entry)| if entry.is_expired() { Some(*ip) } else { None })
-            .collect();
-            
-        for ip in expired_ips {
-            debug!("Cleaning expired whitelist entry for IP {}", ip);
-            ips.remove(&ip);
-        }
-        
+        let ips = self.authenticated_ips.read().await;
         ips.len()
-    }
-
-    /// Clean expired entries periodically
-    async fn cleanup_expired(&self) {
-        let mut ips = self.authenticated_ips.write().await;
-        let before_count = ips.len();
-        
-        ips.retain(|ip, entry| {
-            if entry.is_expired() {
-                debug!("Removing expired whitelist entry for IP {}", ip);
-                false
-            } else {
-                true
-            }
-        });
-        
-        let after_count = ips.len();
-        if before_count != after_count {
-            info!("Cleaned {} expired whitelist entries", before_count - after_count);
-        }
     }
 }
 
+/// Useful read 1. https://blog.yoshuawuyts.com/rust-streams/
+/// Useful read 2. https://blog.yoshuawuyts.com/futures-concurrency/
+/// Useful read 3. https://blog.yoshuawuyts.com/streams-concurrency/
+/// error-libs benchmark: https://blog.yoshuawuyts.com/error-handling-survey/
+///
+/// TODO: Write functional tests: https://github.com/ark0f/async-socks5/blob/master/src/lib.rs#L762
+/// TODO: Write functional tests with cURL?
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
+
     spawn_socks_server().await
 }
 
@@ -224,27 +156,7 @@ async fn spawn_socks_server() -> Result<()> {
 
     info!("Listen for socks connections @ {}", &opt.listen_addr);
     if opt.auth_once {
-        if opt.whitelist_ttl > 0 {
-            info!("One-time authentication enabled - IPs will be whitelisted for {} seconds", opt.whitelist_ttl);
-        } else {
-            info!("One-time authentication enabled - IPs will be permanently whitelisted");
-        }
-    }
-
-    // Spawn cleanup task if TTL is enabled
-    if opt.auth_once && opt.whitelist_ttl > 0 {
-        let auth_state_cleanup = auth_state.clone();
-        let cleanup_interval = std::cmp::max(opt.whitelist_ttl / 4, 30); // Clean every 1/4 of TTL or 30s minimum
-        
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(cleanup_interval));
-            loop {
-                interval.tick().await;
-                auth_state_cleanup.cleanup_expired().await;
-            }
-        });
-        
-        info!("Started whitelist cleanup task (interval: {} seconds)", cleanup_interval);
+        info!("One-time authentication enabled - IPs will be whitelisted after successful auth");
     }
 
     // Standard TCP loop
@@ -268,57 +180,40 @@ async fn serve_socks5(
     auth_state: AuthState
 ) -> Result<(), SocksError> {
     
-    // Pre-check whitelist status for auth_once mode
-    let is_whitelisted = if opt.auth_once {
-        auth_state.is_authenticated(&client_ip).await
+    // Check if IP is already authenticated (for auth_once mode)
+    let skip_auth_for_ip = if opt.auth_once {
+        if auth_state.is_authenticated(&client_ip).await {
+            debug!("IP {} is whitelisted, skipping authentication", client_ip);
+            true
+        } else {
+            debug!("IP {} not in whitelist, requiring authentication", client_ip);
+            false
+        }
     } else {
         false
     };
 
-    // Choose authentication method based on whitelist status
-    let (proto, cmd, target_addr) = if is_whitelisted {
-        // IP is whitelisted - use NO AUTH for maximum performance
-        debug!("IP {} is whitelisted, using no-auth method", client_ip);
-        Socks5ServerProtocol::accept_no_auth(socket).await?
-    } else {
-        // IP not whitelisted - use configured auth method
-        match &opt.auth {
-            AuthMode::NoAuth if opt.skip_auth => {
-                debug!("Using skip-auth method for {}", client_ip);
-                Socks5ServerProtocol::skip_auth_this_is_not_rfc_compliant(socket)
-            }
-            AuthMode::NoAuth => {
-                debug!("Using no-auth method for {}", client_ip);
+    let (proto, cmd, target_addr) = match &opt.auth {
+        AuthMode::NoAuth if opt.skip_auth => {
+            Socks5ServerProtocol::skip_auth_this_is_not_rfc_compliant(socket)
+        }
+        AuthMode::NoAuth => Socks5ServerProtocol::accept_no_auth(socket).await?,
+        AuthMode::Password { username, password } => {
+            if skip_auth_for_ip {
+                // IP is whitelisted, accept without authentication
                 Socks5ServerProtocol::accept_no_auth(socket).await?
-            }
-            AuthMode::Password { username, password } => {
-                debug!("Requiring password authentication for {}", client_ip);
-                
-                let start_time = std::time::Instant::now();
+            } else {
+                // Perform authentication
                 let result = Socks5ServerProtocol::accept_password_auth(socket, |user, pass| {
-                    let auth_success = user == *username && pass == *password;
-                    if auth_success {
-                        debug!("Authentication successful for user: {} from IP: {}", user, client_ip);
-                    } else {
-                        warn!("Authentication failed for user: {} from IP: {}", user, client_ip);
-                    }
-                    auth_success
+                    user == *username && pass == *password
                 })
                 .await?;
                 
-                let auth_duration = start_time.elapsed();
-                debug!("Authentication completed in {:?} for {}", auth_duration, client_ip);
-                
                 // If auth was successful and auth_once is enabled, add IP to whitelist
                 if opt.auth_once {
-                    let ttl = if opt.whitelist_ttl > 0 { 
-                        Some(opt.whitelist_ttl) 
-                    } else { 
-                        None 
-                    };
-                    auth_state.add_authenticated_ip(client_ip, ttl).await;
+                    auth_state.add_authenticated_ip(client_ip).await;
                     let count = auth_state.authenticated_count().await;
-                    info!("IP {} authenticated and whitelisted. Total active whitelist entries: {}", client_ip, count);
+                    debug!("Authentication successful for {}. Total whitelisted IPs: {}", client_ip, count);
                 }
                 
                 result.0
