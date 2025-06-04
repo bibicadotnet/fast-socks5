@@ -1,6 +1,4 @@
 #[forbid(unsafe_code)]
-#[macro_use]
-extern crate log;
 
 use anyhow::Context;
 use fast_socks5::{
@@ -74,22 +72,18 @@ impl AuthState {
 
     async fn add_authenticated_ip(&self, ip: IpAddr) {
         let mut ips = self.authenticated_ips.write().await;
-        if ips.insert(ip) {
-            info!("IP {} added to whitelist", ip);
-        }
+        ips.insert(ip);
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init();
     spawn_socks_server().await
 }
 
 async fn spawn_socks_server() -> Result<()> {
     let opt: &'static Opt = Box::leak(Box::new(Opt::from_args()));
     
-    // Validation checks (giữ nguyên)
     if opt.allow_udp && opt.public_addr.is_none() {
         return Err(SocksError::ArgumentInputError(
             "Can't allow UDP if public-addr is not set",
@@ -114,11 +108,6 @@ async fn spawn_socks_server() -> Result<()> {
     let listener = TcpListener::bind(&opt.listen_addr).await?;
     let auth_state = AuthState::new();
 
-    info!("Listening on {}", &opt.listen_addr);
-    if opt.auth_once {
-        info!("One-time authentication enabled");
-    }
-
     loop {
         match listener.accept().await {
             Ok((socket, client_addr)) => {
@@ -130,7 +119,7 @@ async fn spawn_socks_server() -> Result<()> {
                     auth_state_clone
                 ));
             }
-            Err(err) => error!("Accept error: {:?}", err),
+            Err(err) => {},
         }
     }
 }
@@ -141,7 +130,6 @@ async fn handle_client(
     client_ip: IpAddr,
     auth_state: AuthState,
 ) -> Result<(), SocksError> {
-    debug!("New connection from {}", client_ip);
 
     let is_whitelisted = opt.auth_once && auth_state.is_authenticated(&client_ip).await;
 
@@ -161,11 +149,9 @@ async fn handle_client(
                 socket,
                 move |user, pass| {
                     if is_whitelisted {
-                        debug!("Bypassing auth for whitelisted IP {}", client_ip);
                         true
                     } else {
                         let valid = user == username_clone && pass == password_clone;
-                        debug!("Auth attempt from {}: user '{}' {}", client_ip, user, if valid { "success" } else { "failed" });
                         valid
                     }
                 },
@@ -173,7 +159,6 @@ async fn handle_client(
 
             if auth_success && opt.auth_once && !is_whitelisted {
                 auth_state.add_authenticated_ip(client_ip).await;
-                info!("Added {} to whitelist", client_ip);
             }
 
             proto
@@ -186,11 +171,9 @@ async fn handle_client(
 
     match cmd {
         Socks5Command::TCPConnect => {
-            debug!("TCP connect to {}", target_addr);
             run_tcp_proxy(proto, &target_addr, opt.request_timeout, false).await?;
         }
         Socks5Command::UDPAssociate if opt.allow_udp => {
-            debug!("UDP associate to {}", target_addr);
             let reply_ip = opt.public_addr.context("invalid reply ip")?;
             run_udp_proxy(proto, &target_addr, None, reply_ip, None).await?;
         }
@@ -208,8 +191,7 @@ where
     F: Future<Output = Result<()>> + Send + 'static,
 {
     task::spawn(async move {
-        if let Err(e) = fut.await {
-            error!("Client error: {:#}", e);
+        if let Err(_) = fut.await {
         }
     })
 }
