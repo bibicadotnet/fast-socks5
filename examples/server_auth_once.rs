@@ -1,4 +1,4 @@
-#[forbid(unsafe_code)]
+#![forbid(unsafe_code)]
 #[macro_use]
 extern crate log;
 
@@ -139,14 +139,14 @@ async fn serve_socks5(
     state: Arc<ServerState>,
 ) -> Result<(), SocksError> {
     let mut buf = [0u8; 2];
-    socket.read_exact(&mut buf).await.map_err(|_| SocksError::InvalidData)?;
+    socket.read_exact(&mut buf).await.map_err(|_| SocksError::ArgumentInputError("Failed to read SOCKS version and methods length"))?;
     if buf[0] != 0x05 {
-        return Err(SocksError::InvalidData);
+        return Err(SocksError::ArgumentInputError("Invalid SOCKS version"));
     }
 
     let nmethods = buf[1] as usize;
     let mut methods = vec![0u8; nmethods];
-    socket.read_exact(&mut methods).await.map_err(|_| SocksError::InvalidData)?;
+    socket.read_exact(&mut methods).await.map_err(|_| SocksError::ArgumentInputError("Failed to read methods"))?;
 
     let ip_whitelisted = opt.auth_once && state.auth_once_ips.read().await.contains(&client_ip);
     let selected = select_auth_method(&methods, opt, client_ip, ip_whitelisted);
@@ -155,11 +155,11 @@ async fn serve_socks5(
         Some(m) => m,
         None => {
             socket.write_all(&[0x05, 0xFF]).await.ok();
-            return Err(SocksError::InvalidData);
+            return Err(SocksError::ArgumentInputError("No acceptable authentication method"));
         }
     };
 
-    socket.write_all(&[0x05, auth_method]).await.map_err(|_| SocksError::InvalidData)?;
+    socket.write_all(&[0x05, auth_method]).await.map_err(|_| SocksError::ArgumentInputError("Failed to write selected auth method"))?;
 
     let (proto, cmd, target_addr) = match auth_method {
         0x00 => {
@@ -186,10 +186,10 @@ async fn serve_socks5(
 
                 proto
             } else {
-                return Err(SocksError::InvalidData);
+                return Err(SocksError::ArgumentInputError("Password auth selected but no credentials provided"));
             }
         }
-        _ => return Err(SocksError::InvalidData),
+        _ => return Err(SocksError::ArgumentInputError("Unsupported authentication method")),
     }
     .read_command()
     .await?
