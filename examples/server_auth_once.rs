@@ -158,10 +158,10 @@ async fn serve_socks5(
     let (proto, cmd, target_addr) = proto.read_command().await?.resolve_dns().await?;
 
     match cmd {
-        Socks5Command::TCPConnect => {
+        Socks5Command::TcpConnect => {
             run_tcp_proxy(proto, &target_addr, opt.request_timeout, false).await?;
         }
-        Socks5Command::UDPAssociate if opt.allow_udp => {
+        Socks5Command::UdpAssociate if opt.allow_udp => {
             let reply_ip = opt.public_addr.context("invalid reply ip")?;
             run_udp_proxy(proto, &target_addr, None, reply_ip, None).await?;
         }
