@@ -11,7 +11,7 @@ fn main() {
     let skip_auth = env::var("SKIP_AUTH").unwrap_or_else(|_| "false".to_string());
     let auth_once = env::var("AUTH_ONCE").unwrap_or_else(|_| "false".to_string());
     
-    // Build base arguments
+    // Build base arguments (before subcommand)
     let mut args = vec![
         "--listen-addr".to_string(),
         format!("0.0.0.0:{}", proxy_port),
@@ -36,7 +36,7 @@ fn main() {
         args.push("--auth-once".to_string());
     }
     
-    // Handle authentication mode
+    // Handle authentication mode (subcommand comes last)
     match auth_mode.as_str() {
         "no-auth" => {
             // Validate auth-once with no-auth (should error)
@@ -45,9 +45,24 @@ fn main() {
                 eprintln!("AUTH_ONCE requires password authentication. Set AUTH_MODE=password");
                 std::process::exit(1);
             }
+            
+            // Validate skip-auth with auth-once
+            if skip_auth.to_lowercase() == "true" {
+                eprintln!("ERROR: Cannot use SKIP_AUTH=true with authentication mode");
+                eprintln!("SKIP_AUTH conflicts with authentication. Use AUTH_MODE=no-auth instead");
+                std::process::exit(1);
+            }
+            
             args.push("no-auth".to_string());
         }
         "password" | _ => {
+            // Validate skip-auth with password auth
+            if skip_auth.to_lowercase() == "true" {
+                eprintln!("ERROR: Cannot use SKIP_AUTH=true with authentication mode");
+                eprintln!("SKIP_AUTH conflicts with authentication. Use AUTH_MODE=no-auth instead");
+                std::process::exit(1);
+            }
+            
             // Get credentials from environment
             match (env::var("PROXY_USER"), env::var("PROXY_PASSWORD")) {
                 (Ok(user), Ok(password)) => {
@@ -56,6 +71,7 @@ fn main() {
                         std::process::exit(1);
                     }
                     
+                    // Add password subcommand with its arguments
                     args.push("password".to_string());
                     args.push("--username".to_string());
                     args.push(user);
@@ -69,6 +85,9 @@ fn main() {
             }
         }
     }
+    
+    // Debug: Print the command that will be executed (remove in production)
+    println!("Executing: /usr/local/bin/fast-socks5-server {}", args.join(" "));
     
     // Execute the SOCKS5 server
     let status = Command::new("/usr/local/bin/fast-socks5-server")
