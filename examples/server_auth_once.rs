@@ -133,12 +133,12 @@ async fn serve_socks5(
                 match selected_method {
                     0 => {
                         // NO_AUTH selected (whitelisted IP)
-                        debug!("IP {} whitelisted, using NO_AUTH", client_ip);
+                        info!("IP {} whitelisted, using NO_AUTH", client_ip);
                         Socks5ServerProtocol::accept_no_auth(socket).await?
                     },
                     2 => {
                         // PASSWORD auth selected
-                        debug!("IP {} requires PASSWORD auth", client_ip);
+                        info!("IP {} requires PASSWORD auth", client_ip);
                         let (proto, ..) = Socks5ServerProtocol::accept_password_auth(socket, |user, pass| {
                             user == *username && pass == *password
                         }).await?;
@@ -153,7 +153,7 @@ async fn serve_socks5(
                 }
             } else {
                 // Normal password auth without auth_once
-                debug!("IP {} requires PASSWORD auth", client_ip);
+                info!("Using PASSWORD auth for IP {}", client_ip);
                 let (proto, ..) = Socks5ServerProtocol::accept_password_auth(socket, |user, pass| {
                     user == *username && pass == *password
                 }).await?;
@@ -203,24 +203,30 @@ async fn negotiate_auth_method(
     }
     
     let methods = &buf[2..2+n_methods];
+    debug!("Client {} supports methods: {:?}", client_ip, methods);
     
     // Check if IP is whitelisted
     let is_whitelisted = whitelist.read().await.contains(&client_ip);
     
     let selected_method = if is_whitelisted {
-        // For whitelisted IPs, prefer NO_AUTH if available
+        // IP đã được whitelist - ưu tiên NO_AUTH nhưng chấp nhận cả PASSWORD
         if methods.contains(&0) {
             debug!("IP {} whitelisted, selecting NO_AUTH", client_ip);
-            0
+            0  // NO_AUTH
+        } else if methods.contains(&2) {
+            debug!("IP {} whitelisted but client only supports PASSWORD, accepting it", client_ip);
+            2  // PASSWORD (vẫn chấp nhận vì có thể client đã cache credentials)
         } else {
+            debug!("IP {} whitelisted but no supported methods", client_ip);
             0xFF // No acceptable methods
         }
     } else {
-        // For non-whitelisted IPs, require PASSWORD auth
+        // IP chưa được whitelist - chỉ chấp nhận PASSWORD
         if methods.contains(&2) {
             debug!("IP {} not whitelisted, selecting PASSWORD", client_ip);
-            2
+            2  // PASSWORD
         } else {
+            debug!("IP {} not whitelisted and no PASSWORD method available", client_ip);
             0xFF // No acceptable methods
         }
     };
@@ -234,6 +240,7 @@ async fn negotiate_auth_method(
         return Err(SocksError::ArgumentInputError("No acceptable authentication methods"));
     }
     
+    debug!("Selected method {} for IP {}", selected_method, client_ip);
     Ok(selected_method)
 }
 
