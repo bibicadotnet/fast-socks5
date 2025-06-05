@@ -12,23 +12,11 @@ use std::future::Future;
 use std::net::IpAddr;
 use std::sync::Arc;
 use structopt::StructOpt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tokio::task;
 
-/// # How to use it:
-///
-/// Listen on a local address, authentication-free:
-///     `$ RUST_LOG=debug cargo run --example server -- --listen-addr 127.0.0.1:1337 no-auth`
-///
-/// Listen on a local address, with basic username/password requirement:
-///     `$ RUST_LOG=debug cargo run --example server -- --listen-addr 127.0.0.1:1337 password --username admin --password password`
-///
-/// Same as above but with UDP support
-///     `$ RUST_LOG=debug cargo run --example server -- --listen-addr 127.0.0.1:1337 --allow-udp --public-addr 127.0.0.1 password --username admin --password password`
-///
-/// Listen with one-time authentication (IP whitelist after first auth):
-///     `$ RUST_LOG=debug cargo run --example server -- --listen-addr 127.0.0.1:1337 --auth-once password --username admin --password password`
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = "socks5-server",
@@ -48,7 +36,7 @@ struct Opt {
     pub request_timeout: u64,
 
     /// Choose authentication type
-    #[structopt(subcommand, name = "auth")] // Note that we mark a field as a subcommand
+    #[structopt(subcommand, name = "auth")]
     pub auth: AuthMode,
 
     /// Don't perform the auth handshake, send directly the command request
@@ -77,17 +65,9 @@ enum AuthMode {
     },
 }
 
-/// Useful read 1. https://blog.yoshuawuyts.com/rust-streams/
-/// Useful read 2. https://blog.yoshuawuyts.com/futures-concurrency/
-/// Useful read 3. https://blog.yoshuawuyts.com/streams-concurrency/
-/// error-libs benchmark: https://blog.yoshuawuyts.com/error-handling-survey/
-///
-/// TODO: Write functional tests: https://github.com/ark0f/async-socks5/blob/master/src/lib.rs#L762
-/// TODO: Write functional tests with cURL?
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
-
     spawn_socks_server().await
 }
 
@@ -133,55 +113,6 @@ async fn spawn_socks_server() -> Result<()> {
     }
 }
 
-// Cần implement custom method negotiation như MicroSocks
-async fn negotiate_auth_method(
-    socket: &mut tokio::net::TcpStream,
-    client_ip: IpAddr,
-    whitelist: &Arc<RwLock<HashSet<IpAddr>>>,
-    auth_mode: &AuthMode
-) -> Result<u8, SocksError> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    
-    // Read method selection request
-    let mut buf = [0u8; 257];
-    let n = socket.read(&mut buf).await?;
-    
-    if n < 2 || buf[0] != 5 {
-        return Err(SocksError::InvalidData);
-    }
-    
-    let n_methods = buf[1] as usize;
-    if n < 2 + n_methods {
-        return Err(SocksError::InvalidData);
-    }
-    
-    let methods = &buf[2..2+n_methods];
-    
-    // Check available methods like MicroSocks
-    let selected_method = match auth_mode {
-        AuthMode::NoAuth => {
-            if methods.contains(&0) { 0 } else { 0xFF }
-        },
-        AuthMode::Password { .. } => {
-            // Check if IP is whitelisted (auth_once logic)
-            if whitelist.read().await.contains(&client_ip) {
-                debug!("IP {} whitelisted, selecting NO_AUTH", client_ip);
-                if methods.contains(&0) { 0 } else { 0xFF }
-            } else {
-                debug!("IP {} requires PASSWORD auth", client_ip);
-                if methods.contains(&2) { 2 } else { 0xFF }
-            }
-        }
-    };
-
-// Send method selection response
-    let response = [5u8, selected_method];
-    socket.write_all(&response).await?;
-    
-    Ok(selected_method)
-}
-
-// Modify serve_socks5 function
 async fn serve_socks5(
     opt: &Opt, 
     mut socket: tokio::net::TcpStream, 
@@ -195,29 +126,38 @@ async fn serve_socks5(
         }
         AuthMode::NoAuth => Socks5ServerProtocol::accept_no_auth(socket).await?,
         AuthMode::Password { username, password } => {
-            // Use proper method negotiation
-            let selected_method = negotiate_auth_method(&mut socket, client_ip, &whitelist, &opt.auth).await?;
-            
-            match selected_method {
-                0 => {
-                    // NO_AUTH selected (whitelisted IP)
-                    Socks5ServerProtocol::accept_no_auth(socket).await?
-                },
-                2 => {
-                    // PASSWORD auth selected
-                    let (proto, ..) = Socks5ServerProtocol::accept_password_auth(socket, |user, pass| {
-                        user == *username && pass == *password
-                    }).await?;
-                    
-                    // Add to whitelist after successful auth
-                    if opt.auth_once {
+            // Custom method negotiation for auth_once support
+            if opt.auth_once {
+                let selected_method = negotiate_auth_method(&mut socket, client_ip, &whitelist).await?;
+                
+                match selected_method {
+                    0 => {
+                        // NO_AUTH selected (whitelisted IP)
+                        debug!("IP {} whitelisted, using NO_AUTH", client_ip);
+                        Socks5ServerProtocol::accept_no_auth(socket).await?
+                    },
+                    2 => {
+                        // PASSWORD auth selected
+                        debug!("IP {} requires PASSWORD auth", client_ip);
+                        let (proto, ..) = Socks5ServerProtocol::accept_password_auth(socket, |user, pass| {
+                            user == *username && pass == *password
+                        }).await?;
+                        
+                        // Add to whitelist after successful auth
                         whitelist.write().await.insert(client_ip);
                         info!("IP {} authenticated and whitelisted", client_ip);
-                    }
-                    
-                    proto
-                },
-                _ => return Err(SocksError::NoAcceptableAuthMethods)
+                        
+                        proto
+                    },
+                    _ => return Err(SocksError::NoAcceptableAuthMethods)
+                }
+            } else {
+                // Normal password auth without auth_once
+                debug!("IP {} requires PASSWORD auth", client_ip);
+                let (proto, ..) = Socks5ServerProtocol::accept_password_auth(socket, |user, pass| {
+                    user == *username && pass == *password
+                }).await?;
+                proto
             }
         }
     }
@@ -240,6 +180,61 @@ async fn serve_socks5(
         }
     };
     Ok(())
+}
+
+// Custom method negotiation similar to MicroSocks
+async fn negotiate_auth_method(
+    socket: &mut tokio::net::TcpStream,
+    client_ip: IpAddr,
+    whitelist: &Arc<RwLock<HashSet<IpAddr>>>,
+) -> Result<u8, SocksError> {
+    // Read method selection request
+    let mut buf = [0u8; 257];
+    let n = socket.read(&mut buf).await
+        .map_err(|_| SocksError::InvalidData)?;
+    
+    if n < 2 || buf[0] != 5 {
+        return Err(SocksError::InvalidVersion);
+    }
+    
+    let n_methods = buf[1] as usize;
+    if n < 2 + n_methods {
+        return Err(SocksError::InvalidData);
+    }
+    
+    let methods = &buf[2..2+n_methods];
+    
+    // Check if IP is whitelisted
+    let is_whitelisted = whitelist.read().await.contains(&client_ip);
+    
+    let selected_method = if is_whitelisted {
+        // For whitelisted IPs, prefer NO_AUTH if available
+        if methods.contains(&0) {
+            debug!("IP {} whitelisted, selecting NO_AUTH", client_ip);
+            0
+        } else {
+            0xFF // No acceptable methods
+        }
+    } else {
+        // For non-whitelisted IPs, require PASSWORD auth
+        if methods.contains(&2) {
+            debug!("IP {} not whitelisted, selecting PASSWORD", client_ip);
+            2
+        } else {
+            0xFF // No acceptable methods
+        }
+    };
+    
+    // Send method selection response
+    let response = [5u8, selected_method];
+    socket.write_all(&response).await
+        .map_err(|_| SocksError::InvalidData)?;
+    
+    if selected_method == 0xFF {
+        return Err(SocksError::NoAcceptableAuthMethods);
+    }
+    
+    Ok(selected_method)
 }
 
 fn spawn_and_log_error<F>(fut: F) -> task::JoinHandle<()>
