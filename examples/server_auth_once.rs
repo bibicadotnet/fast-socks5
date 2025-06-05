@@ -149,7 +149,7 @@ async fn serve_socks5(
                         
                         proto
                     },
-                    _ => return Err(SocksError::NoAcceptableAuthMethods)
+                    _ => return Err(SocksError::ArgumentInputError("No acceptable authentication methods"))
                 }
             } else {
                 // Normal password auth without auth_once
@@ -191,15 +191,15 @@ async fn negotiate_auth_method(
     // Read method selection request
     let mut buf = [0u8; 257];
     let n = socket.read(&mut buf).await
-        .map_err(|_| SocksError::InvalidData)?;
+        .map_err(|e| SocksError::Io(e))?;
     
     if n < 2 || buf[0] != 5 {
-        return Err(SocksError::InvalidVersion);
+        return Err(SocksError::ArgumentInputError("Invalid SOCKS version"));
     }
     
     let n_methods = buf[1] as usize;
     if n < 2 + n_methods {
-        return Err(SocksError::InvalidData);
+        return Err(SocksError::ArgumentInputError("Invalid data format"));
     }
     
     let methods = &buf[2..2+n_methods];
@@ -228,10 +228,10 @@ async fn negotiate_auth_method(
     // Send method selection response
     let response = [5u8, selected_method];
     socket.write_all(&response).await
-        .map_err(|_| SocksError::InvalidData)?;
+        .map_err(|e| SocksError::Io(e))?;
     
     if selected_method == 0xFF {
-        return Err(SocksError::NoAcceptableAuthMethods);
+        return Err(SocksError::ArgumentInputError("No acceptable authentication methods"));
     }
     
     Ok(selected_method)
