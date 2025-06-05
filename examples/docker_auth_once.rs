@@ -18,24 +18,24 @@ fn main() {
         "--request-timeout".to_string(),
         request_timeout,
     ];
-
+    
     // Add UDP support if enabled and public address is provided
     if allow_udp.to_lowercase() == "true" && !public_addr.is_empty() {
         args.push("--allow-udp".to_string());
         args.push("--public-addr".to_string());
         args.push(public_addr);
     }
-
+    
     // Add skip-auth flag if enabled
     if skip_auth.to_lowercase() == "true" {
         args.push("--skip-auth".to_string());
     }
-
+    
     // Add auth-once flag if enabled
     if auth_once.to_lowercase() == "true" {
         args.push("--auth-once".to_string());
     }
-
+    
     // Handle authentication mode
     match auth_mode.as_str() {
         "no-auth" => {
@@ -69,7 +69,7 @@ fn main() {
             }
         }
     }
-
+    
     // Execute the SOCKS5 server
     let status = Command::new("/usr/local/bin/fast-socks5-server")
         .args(&args)
@@ -80,6 +80,6 @@ fn main() {
         .stderr(Stdio::null())
         .status()
         .expect("Failed to execute fast-socks5-server");
-
+    
     std::process::exit(status.code().unwrap_or(1));
 }
