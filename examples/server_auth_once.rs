@@ -5,15 +5,14 @@ extern crate log;
 use anyhow::Context;
 use fast_socks5::{
     server::{run_tcp_proxy, run_udp_proxy, DnsResolveHelper as _, Socks5ServerProtocol},
-    ReplyError, Result, Socks5Command, SocksError,
+    ReplyError, Result, Socks5Command, SocksError, AuthMethod,
 };
 use std::collections::HashSet;
 use std::future::Future;
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use structopt::StructOpt;
 use tokio::net::TcpListener;
-use tokio::sync::RwLock;
 use tokio::task;
 
 /// # How to use it:
@@ -25,10 +24,10 @@ use tokio::task;
 ///     `$ RUST_LOG=debug cargo run --example server -- --listen-addr 127.0.0.1:1337 password --username admin --password password`
 ///
 /// Listen with one-time authentication (IP whitelist after first auth):
-///     `$ RUST_LOG=debug cargo run --example server -- --listen-addr 127.0.0.1:1337 --auth-once password --username admin --password password`
+///     `$ RUST_LOG=debug cargo run --example server -- --listen-addr 127.0.0.1:1337 auth-once --username admin --password password`
 ///
 /// Same as above but with UDP support
-///     `$ RUST_LOG=debug cargo run --example server -- --listen-addr 127.0.0.1:1337 --allow-udp --public-addr 127.0.0.1 password --username admin --password password`
+///     `$ RUST_LOG=debug cargo run --example server -- --listen-addr 127.0.0.1:1337 --allow-udp --public-addr 127.0.0.1 auth-once --username admin --password password`
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = "socks5-server",
@@ -58,10 +57,6 @@ struct Opt {
     /// Allow UDP proxying, requires public-addr to be set
     #[structopt(short = "U", long)]
     pub allow_udp: bool,
-
-    /// Enable one-time authentication (IP whitelist after first successful auth)
-    #[structopt(long)]
-    pub auth_once: bool,
 }
 
 /// Choose the authentication type
@@ -75,10 +70,17 @@ enum AuthMode {
         #[structopt(short, long)]
         password: String,
     },
+    AuthOnce {
+        #[structopt(short, long)]
+        username: String,
+
+        #[structopt(short, long)]
+        password: String,
+    },
 }
 
-// Shared state for authenticated IPs
-type AuthenticatedIPs = Arc<RwLock<HashSet<IpAddr>>>;
+// Global whitelist (shared state)
+type SharedWhitelist = Arc<Mutex<HashSet<IpAddr>>>;
 
 /// Useful read 1. https://blog.yoshuawuyts.com/rust-streams/
 /// Useful read 2. https://blog.yoshuawuyts.com/futures-concurrency/
@@ -106,26 +108,20 @@ async fn spawn_socks_server() -> Result<()> {
             "Can't use skip-auth flag and authentication altogether.",
         ));
     }
-    if opt.auth_once && opt.auth == AuthMode::NoAuth {
-        return Err(SocksError::ArgumentInputError(
-            "Can't use auth-once flag without authentication.",
-        ));
-    }
 
     let listener = TcpListener::bind(&opt.listen_addr).await?;
-    let authenticated_ips: AuthenticatedIPs = Arc::new(RwLock::new(HashSet::new()));
 
     info!("Listen for socks connections @ {}", &opt.listen_addr);
-    if opt.auth_once {
-        info!("One-time authentication enabled - IPs will be whitelisted after first successful auth");
-    }
+
+    // Shared whitelist for auth-once mode
+    let whitelist: SharedWhitelist = Arc::new(Mutex::new(HashSet::new()));
 
     // Standard TCP loop
     loop {
         match listener.accept().await {
             Ok((socket, client_addr)) => {
-                let authenticated_ips = authenticated_ips.clone();
-                spawn_and_log_error(serve_socks5(opt, socket, client_addr.ip(), authenticated_ips));
+                let whitelist = whitelist.clone();
+                spawn_and_log_error(serve_socks5(opt, socket, client_addr.ip(), whitelist));
             }
             Err(err) => {
                 error!("accept error = {:?}", err);
@@ -138,7 +134,7 @@ async fn serve_socks5(
     opt: &Opt,
     socket: tokio::net::TcpStream,
     client_ip: IpAddr,
-    authenticated_ips: AuthenticatedIPs,
+    whitelist: SharedWhitelist,
 ) -> Result<(), SocksError> {
     let (proto, cmd, target_addr) = match &opt.auth {
         AuthMode::NoAuth if opt.skip_auth => {
@@ -146,40 +142,59 @@ async fn serve_socks5(
         }
         AuthMode::NoAuth => Socks5ServerProtocol::accept_no_auth(socket).await?,
         AuthMode::Password { username, password } => {
-            // Check if auth_once is enabled and IP is already authenticated
-            if opt.auth_once {
-                let is_authenticated = {
-                    let ips = authenticated_ips.read().await;
-                    ips.contains(&client_ip)
-                };
-                
-                if is_authenticated {
-                    info!("IP {} already authenticated, skipping auth", client_ip);
-                    // Use custom auth method that allows both no-auth and password
-                    Socks5ServerProtocol::accept_auth_once(socket, client_ip, authenticated_ips.clone()).await?
-                } else {
-                    info!("IP {} not authenticated, requiring password auth", client_ip);
-                    let (proto, _) = Socks5ServerProtocol::accept_password_auth(socket, |user, pass| {
-                        user == *username && pass == *password
-                    })
-                    .await?;
+            Socks5ServerProtocol::accept_password_auth(socket, |user, pass| {
+                user == *username && pass == *password
+            })
+            .await?
+            .0
+        }
+        AuthMode::AuthOnce { username, password } => {
+            // Custom auth selection logic for auth-once
+            let whitelist_clone = whitelist.clone();
+            let username = username.clone();
+            let password = password.clone();
+            
+            Socks5ServerProtocol::accept_custom_auth(
+                socket,
+                move |client_methods, _socket| {
+                    let is_whitelisted = whitelist_clone.lock().unwrap().contains(&client_ip);
                     
-                    // Add IP to authenticated list after successful auth
-                    {
-                        let mut ips = authenticated_ips.write().await;
-                        ips.insert(client_ip);
-                        info!("IP {} authenticated and added to whitelist", client_ip);
+                    // Implement the pseudo-code logic
+                    for method in client_methods {
+                        match method {
+                            AuthMethod::NoAuth => {
+                                if is_whitelisted {
+                                    debug!("Client IP {} is whitelisted, allowing no-auth", client_ip);
+                                    return Ok(Some(AuthMethod::NoAuth));
+                                }
+                                // IP chưa whitelist => không chọn NO_AUTH, tiếp tục duyệt
+                            }
+                            AuthMethod::UserPass => {
+                                debug!("Selecting username/password auth for IP {}", client_ip);
+                                return Ok(Some(AuthMethod::UserPass));
+                            }
+                            _ => {
+                                // Bỏ qua các method khác
+                            }
+                        }
                     }
-                    
-                    proto
-                }
-            } else {
-                Socks5ServerProtocol::accept_password_auth(socket, |user, pass| {
-                    user == *username && pass == *password
-                })
-                .await?
-                .0
-            }
+                    // Không có method nào hợp lệ
+                    Ok(None)
+                },
+                move |user, pass| {
+                    if user == username && pass == password {
+                        // Auth thành công - thêm IP vào whitelist
+                        whitelist.lock().unwrap().insert(client_ip);
+                        info!("Authentication successful for IP {}, added to whitelist", client_ip);
+                        Ok(())
+                    } else {
+                        warn!("Authentication failed for IP {}", client_ip);
+                        Err(SocksError::AuthFailure)
+                    }
+                },
+            )
+            .await?
+            .0
         }
     }
     .read_command()
@@ -213,80 +228,4 @@ where
             Err(err) => error!("{:#}", &err),
         }
     })
-}
-
-// Extension trait for Socks5ServerProtocol to handle auth_once
-trait Socks5ServerProtocolExt {
-    async fn accept_auth_once(
-        socket: tokio::net::TcpStream,
-        client_ip: IpAddr,
-        authenticated_ips: AuthenticatedIPs,
-    ) -> Result<Socks5ServerProtocol, SocksError>;
-}
-
-impl Socks5ServerProtocolExt for Socks5ServerProtocol {
-    async fn accept_auth_once(
-        socket: tokio::net::TcpStream,
-        client_ip: IpAddr,
-        authenticated_ips: AuthenticatedIPs,
-    ) -> Result<Socks5ServerProtocol, SocksError> {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        
-        let mut socket = socket;
-        
-        // Read client's authentication methods
-        let mut buf = [0u8; 2];
-        socket.read_exact(&mut buf).await?;
-        
-        let version = buf[0];
-        let nmethods = buf[1] as usize;
-        
-        if version != 5 {
-            return Err(SocksError::UnsupportedSocksVersion);
-        }
-        
-        let mut methods = vec![0u8; nmethods];
-        socket.read_exact(&mut methods).await?;
-        
-        // Check if IP is in whitelist
-        let is_authenticated = {
-            let ips = authenticated_ips.read().await;
-            ips.contains(&client_ip)
-        };
-        
-        // Apply pseudo-code logic for method selection
-        let selected_method = if is_authenticated {
-            // IP is whitelisted, prefer no-auth if available
-            if methods.contains(&0x00) {
-                0x00 // NO_AUTH
-            } else if methods.contains(&0x02) {
-                0x02 // USERNAME_PASSWORD
-            } else {
-                0xFF // NO_ACCEPTABLE_METHODS
-            }
-        } else {
-            // IP not whitelisted, require authentication
-            if methods.contains(&0x02) {
-                0x02 // USERNAME_PASSWORD
-            } else {
-                0xFF // NO_ACCEPTABLE_METHODS
-            }
-        };
-        
-        // Send selected method
-        socket.write_all(&[5, selected_method]).await?;
-        
-        match selected_method {
-            0x00 => {
-                // No authentication required
-                Ok(Socks5ServerProtocol::new(socket))
-            }
-            0x02 => {
-                // Username/password authentication required
-                // This should be handled by the caller with proper credentials
-                Err(SocksError::AuthMethodUnacceptable)
-            }
-            _ => Err(SocksError::AuthMethodUnacceptable),
-        }
-    }
 }
