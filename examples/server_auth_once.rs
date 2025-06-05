@@ -82,7 +82,6 @@ impl AuthState {
     }
 }
 
-// Thay đổi Result về anyhow::Result cho dễ xài anyhow::bail!
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = Opt::from_args();
@@ -131,8 +130,7 @@ async fn serve_socks5(
     socket: tokio::net::TcpStream,
     client_ip: IpAddr,
     auth_state: AuthState,
-) -> Result<(), SocksError> {
-    // Bỏ .await khi gọi skip_auth_this_is_not_rfc_compliant
+) -> anyhow::Result<()> {
     let proto = if opt.auth_once && auth_state.is_whitelisted(client_ip).await {
         Socks5ServerProtocol::skip_auth_this_is_not_rfc_compliant(socket)
     } else {
@@ -159,7 +157,6 @@ async fn serve_socks5(
 
     let (proto, cmd, target_addr) = proto.read_command().await?.resolve_dns().await?;
 
-    // Sửa tên variant enum thành đúng kiểu
     match cmd {
         Socks5Command::TCPConnect => {
             run_tcp_proxy(proto, &target_addr, opt.request_timeout, false).await?;
@@ -170,7 +167,7 @@ async fn serve_socks5(
         }
         _ => {
             proto.reply_error(&ReplyError::CommandNotSupported).await?;
-            return Err(ReplyError::CommandNotSupported.into());
+            return Err(anyhow::anyhow!("Command not supported"));
         }
     }
 
