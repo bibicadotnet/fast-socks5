@@ -85,17 +85,9 @@ struct ServerState {
     auth_once_ips: RwLock<HashSet<IpAddr>>,
 }
 
-/// Useful read 1. https://blog.yoshuawuyts.com/rust-streams/
-/// Useful read 2. https://blog.yoshuawuyts.com/futures-concurrency/
-/// Useful read 3. https://blog.yoshuawuyts.com/streams-concurrency/
-/// error-libs benchmark: https://blog.yoshuawuyts.com/error-handling-survey/
-///
-/// TODO: Write functional tests: https://github.com/ark0f/async-socks5/blob/master/src/lib.rs#L762
-/// TODO: Write functional tests with cURL?
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
-
     spawn_socks_server().await
 }
 
@@ -111,7 +103,7 @@ async fn spawn_socks_server() -> Result<()> {
             "Can't use skip-auth flag and authentication altogether.",
         ));
     }
-    if opt.auth_once && opt.auth == AuthMode::NoAuth {
+    if opt.auth_once && matches!(opt.auth, AuthMode::NoAuth) {
         return Err(SocksError::ArgumentInputError(
             "Can't use auth-once with no-auth mode",
         ));
@@ -122,10 +114,8 @@ async fn spawn_socks_server() -> Result<()> {
     });
 
     let listener = TcpListener::bind(&opt.listen_addr).await?;
-
     info!("Listen for socks connections @ {}", &opt.listen_addr);
 
-    // Standard TCP loop
     loop {
         match listener.accept().await {
             Ok((socket, client_addr)) => {
@@ -139,44 +129,120 @@ async fn spawn_socks_server() -> Result<()> {
     }
 }
 
+// Custom auth selection logic theo pseudo-code yêu cầu
+fn select_auth_method(client_methods: &[u8], opt: &Opt, client_ip: IpAddr, ip_whitelisted: bool) -> Option<u8> {
+    let auth_user = !matches!(opt.auth, AuthMode::NoAuth);
+    
+    // Duyệt theo thứ tự client gửi
+    for &method in client_methods {
+        match method {
+            0x00 => { // AM_NO_AUTH
+                if !auth_user {
+                    return Some(0x00); // AM_NO_AUTH
+                } else if opt.auth_once && ip_whitelisted {
+                    return Some(0x00); // AM_NO_AUTH
+                }
+                // IP chưa whitelist => không chọn NO_AUTH, tiếp tục duyệt
+            }
+            0x02 => { // AM_USERNAME
+                if auth_user {
+                    return Some(0x02); // AM_USERNAME
+                }
+                // Nếu không bật auth thì bỏ qua
+            }
+            _ => {
+                // Bỏ qua các method không hỗ trợ
+                continue;
+            }
+        }
+    }
+    
+    // Không method nào hợp lệ → từ chối kết nối
+    None // AM_INVALID
+}
+
 async fn serve_socks5(
     opt: &Opt,
-    socket: tokio::net::TcpStream,
+    mut socket: tokio::net::TcpStream,
     client_ip: IpAddr,
     state: Arc<ServerState>,
 ) -> Result<(), SocksError> {
-    let (proto, cmd, target_addr) = {
-        let is_ip_whitelisted = if opt.auth_once {
-            state.auth_once_ips.read().await.contains(&client_ip)
-        } else {
-            false
-        };
-
-        match &opt.auth {
-            AuthMode::NoAuth if opt.skip_auth => {
+    // Đọc SOCKS5 greeting từ client
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    
+    let mut buf = [0u8; 2];
+    socket.read_exact(&mut buf).await.map_err(|_| SocksError::InvalidData)?;
+    
+    if buf[0] != 0x05 {
+        return Err(SocksError::InvalidData);
+    }
+    
+    let nmethods = buf[1] as usize;
+    if nmethods == 0 {
+        return Err(SocksError::InvalidData);
+    }
+    
+    let mut methods = vec![0u8; nmethods];
+    socket.read_exact(&mut methods).await.map_err(|_| SocksError::InvalidData)?;
+    
+    // Kiểm tra IP có trong whitelist không
+    let ip_whitelisted = if opt.auth_once {
+        state.auth_once_ips.read().await.contains(&client_ip)
+    } else {
+        false
+    };
+    
+    // Áp dụng logic selection theo pseudo-code
+    let selected_method = select_auth_method(&methods, opt, client_ip, ip_whitelisted);
+    
+    let auth_method = match selected_method {
+        Some(method) => method,
+        None => {
+            // Từ chối kết nối
+            socket.write_all(&[0x05, 0xFF]).await.map_err(|_| SocksError::InvalidData)?;
+            return Err(SocksError::InvalidData);
+        }
+    };
+    
+    // Gửi phản hồi method selection
+    socket.write_all(&[0x05, auth_method]).await.map_err(|_| SocksError::InvalidData)?;
+    
+    let (proto, cmd, target_addr) = match auth_method {
+        0x00 => { // NO_AUTH
+            if opt.skip_auth {
                 Socks5ServerProtocol::skip_auth_this_is_not_rfc_compliant(socket)
-            }
-            AuthMode::NoAuth => Socks5ServerProtocol::accept_no_auth(socket).await?,
-            AuthMode::Password { username, password } => {
-                let auth_result = Socks5ServerProtocol::accept_password_auth(socket, |user, pass| {
-                    let auth_ok = user == *username && pass == *password;
-                    if auth_ok && opt.auth_once {
-                        // If auth is successful and auth_once is enabled, add IP to whitelist
-                        task::spawn({
-                            let state = state.clone();
-                            let client_ip = client_ip;
-                            async move {
-                                state.auth_once_ips.write().await.insert(client_ip);
-                            }
-                        });
-                    }
-                    auth_ok
-                })
-                .await?;
-
-                auth_result.0
+            } else {
+                // Tạo protocol object từ socket đã authenticated
+                // (Cần modify fast_socks5 để support trường hợp này)
+                // Tạm thời dùng accept_no_auth
+                Socks5ServerProtocol::accept_no_auth(socket).await?
             }
         }
+        0x02 => { // USERNAME/PASSWORD
+            if let AuthMode::Password { username, password } = &opt.auth {
+                let auth_result = Socks5ServerProtocol::accept_password_auth(
+                    socket,
+                    |user, pass| {
+                        let auth_ok = user == *username && pass == *password;
+                        if auth_ok && opt.auth_once {
+                            // Add to whitelist if auth succeeds
+                            task::spawn({
+                                let state = state.clone();
+                                let client_ip = client_ip;
+                                async move {
+                                    state.auth_once_ips.write().await.insert(client_ip);
+                                }
+                            });
+                        }
+                        auth_ok
+                    },
+                ).await?;
+                auth_result.0
+            } else {
+                return Err(SocksError::InvalidData);
+            }
+        }
+        _ => return Err(SocksError::InvalidData),
     }
     .read_command()
     .await?
