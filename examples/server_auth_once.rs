@@ -133,9 +133,58 @@ async fn spawn_socks_server() -> Result<()> {
     }
 }
 
+// Cần implement custom method negotiation như MicroSocks
+async fn negotiate_auth_method(
+    socket: &mut tokio::net::TcpStream,
+    client_ip: IpAddr,
+    whitelist: &Arc<RwLock<HashSet<IpAddr>>>,
+    auth_mode: &AuthMode
+) -> Result<u8, SocksError> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    
+    // Read method selection request
+    let mut buf = [0u8; 257];
+    let n = socket.read(&mut buf).await?;
+    
+    if n < 2 || buf[0] != 5 {
+        return Err(SocksError::InvalidData);
+    }
+    
+    let n_methods = buf[1] as usize;
+    if n < 2 + n_methods {
+        return Err(SocksError::InvalidData);
+    }
+    
+    let methods = &buf[2..2+n_methods];
+    
+    // Check available methods like MicroSocks
+    let selected_method = match auth_mode {
+        AuthMode::NoAuth => {
+            if methods.contains(&0) { 0 } else { 0xFF }
+        },
+        AuthMode::Password { .. } => {
+            // Check if IP is whitelisted (auth_once logic)
+            if whitelist.read().await.contains(&client_ip) {
+                debug!("IP {} whitelisted, selecting NO_AUTH", client_ip);
+                if methods.contains(&0) { 0 } else { 0xFF }
+            } else {
+                debug!("IP {} requires PASSWORD auth", client_ip);
+                if methods.contains(&2) { 2 } else { 0xFF }
+            }
+        }
+    };
+
+// Send method selection response
+    let response = [5u8, selected_method];
+    socket.write_all(&response).await?;
+    
+    Ok(selected_method)
+}
+
+// Modify serve_socks5 function
 async fn serve_socks5(
     opt: &Opt, 
-    socket: tokio::net::TcpStream, 
+    mut socket: tokio::net::TcpStream, 
     client_ip: IpAddr,
     whitelist: Arc<RwLock<HashSet<IpAddr>>>
 ) -> Result<(), SocksError> {
@@ -146,25 +195,29 @@ async fn serve_socks5(
         }
         AuthMode::NoAuth => Socks5ServerProtocol::accept_no_auth(socket).await?,
         AuthMode::Password { username, password } => {
-            // Check if IP is whitelisted (auth_once mode)
-            if opt.auth_once && whitelist.read().await.contains(&client_ip) {
-                debug!("IP {} whitelisted, forcing NO_AUTH only", client_ip);
-                // Force NO_AUTH for whitelisted IPs - don't advertise PASSWORD method
-                Socks5ServerProtocol::accept_no_auth(socket).await?
-            } else {
-                debug!("IP {} requires PASSWORD auth", client_ip);
-                let (proto, ..) = Socks5ServerProtocol::accept_password_auth(socket, |user, pass| {
-                    user == *username && pass == *password
-                })
-                .await?;
-                
-                // Add to whitelist after successful auth
-                if opt.auth_once {
-                    whitelist.write().await.insert(client_ip);
-                    info!("IP {} authenticated and whitelisted", client_ip);
-                }
-                
-                proto
+            // Use proper method negotiation
+            let selected_method = negotiate_auth_method(&mut socket, client_ip, &whitelist, &opt.auth).await?;
+            
+            match selected_method {
+                0 => {
+                    // NO_AUTH selected (whitelisted IP)
+                    Socks5ServerProtocol::accept_no_auth(socket).await?
+                },
+                2 => {
+                    // PASSWORD auth selected
+                    let (proto, ..) = Socks5ServerProtocol::accept_password_auth(socket, |user, pass| {
+                        user == *username && pass == *password
+                    }).await?;
+                    
+                    // Add to whitelist after successful auth
+                    if opt.auth_once {
+                        whitelist.write().await.insert(client_ip);
+                        info!("IP {} authenticated and whitelisted", client_ip);
+                    }
+                    
+                    proto
+                },
+                _ => return Err(SocksError::NoAcceptableAuthMethods)
             }
         }
     }
