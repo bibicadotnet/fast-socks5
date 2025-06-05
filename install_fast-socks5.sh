@@ -31,10 +31,10 @@ center_text "$(printf "${GREEN}🚀 Fast Socks5 Proxy Installer (Auto Mode) 🚀
 printf "${GREEN}%s${NC}\n" "$(printf '%*s' "$WIDTH" '' | tr ' ' '#')"
 echo ""
 
-# Disable firewall
-apt remove iptables-persistent -y >/dev/null 2>&1
-ufw disable >/dev/null 2>&1
-iptables -F >/dev/null 2>&1
+# Disable firewall 
+# apt remove iptables-persistent -y >/dev/null 2>&1
+# ufw disable >/dev/null 2>&1
+# iptables -F >/dev/null 2>&1
 
 # Create working directory
 WORKDIR="$HOME/fast-socks5"
