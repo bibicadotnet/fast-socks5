@@ -82,8 +82,9 @@ impl AuthState {
     }
 }
 
+// Thay đổi Result về anyhow::Result cho dễ xài anyhow::bail!
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     let opt = Opt::from_args();
 
     if opt.allow_udp && opt.public_addr.is_none() {
@@ -131,12 +132,13 @@ async fn serve_socks5(
     client_ip: IpAddr,
     auth_state: AuthState,
 ) -> Result<(), SocksError> {
+    // Bỏ .await khi gọi skip_auth_this_is_not_rfc_compliant
     let proto = if opt.auth_once && auth_state.is_whitelisted(client_ip).await {
-        Socks5ServerProtocol::skip_auth_this_is_not_rfc_compliant(socket).await
+        Socks5ServerProtocol::skip_auth_this_is_not_rfc_compliant(socket)
     } else {
         match &opt.auth {
             AuthMode::NoAuth if opt.skip_auth => {
-                Socks5ServerProtocol::skip_auth_this_is_not_rfc_compliant(socket).await
+                Socks5ServerProtocol::skip_auth_this_is_not_rfc_compliant(socket)
             }
             AuthMode::NoAuth => Socks5ServerProtocol::accept_no_auth(socket).await?,
             AuthMode::Password { username, password } => {
@@ -157,11 +159,12 @@ async fn serve_socks5(
 
     let (proto, cmd, target_addr) = proto.read_command().await?.resolve_dns().await?;
 
+    // Sửa tên variant enum thành đúng kiểu
     match cmd {
-        Socks5Command::TcpConnect => {
+        Socks5Command::TCPConnect => {
             run_tcp_proxy(proto, &target_addr, opt.request_timeout, false).await?;
         }
-        Socks5Command::UdpAssociate if opt.allow_udp => {
+        Socks5Command::UDPAssociate if opt.allow_udp => {
             let reply_ip = opt.public_addr.context("invalid reply ip")?;
             run_udp_proxy(proto, &target_addr, None, reply_ip, None).await?;
         }
