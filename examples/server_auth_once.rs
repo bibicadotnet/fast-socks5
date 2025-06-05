@@ -148,7 +148,8 @@ async fn serve_socks5(
         AuthMode::Password { username, password } => {
             // Check if IP is whitelisted (auth_once mode)
             if opt.auth_once && whitelist.read().await.contains(&client_ip) {
-                debug!("IP {} whitelisted, using NO_AUTH", client_ip);
+                debug!("IP {} whitelisted, forcing NO_AUTH only", client_ip);
+                // Force NO_AUTH for whitelisted IPs - don't advertise PASSWORD method
                 Socks5ServerProtocol::accept_no_auth(socket).await?
             } else {
                 debug!("IP {} requires PASSWORD auth", client_ip);
